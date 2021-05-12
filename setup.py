@@ -1,0 +1,23 @@
+import setuptools
+
+with open("README.md", "r") as fh:
+    long_description = fh.read()
+
+
+setuptools.setup(
+    name='frigidaire',
+    version='0.1',
+    scripts=['frigidaire'] ,
+    author="Brian Marks",
+    author_email="bmarks1056@gmail.com",
+    description="Python API for the Frigidaire 2.0 App",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/bm1549/frigidaire",
+    packages=setuptools.find_packages(),
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+     ],
+ )
