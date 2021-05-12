@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name='frigidaire',
-    version='0.2',
+    version='0.3',
     author="Brian Marks",
     description="Python API for the Frigidaire 2.0 App",
     long_description=long_description,
