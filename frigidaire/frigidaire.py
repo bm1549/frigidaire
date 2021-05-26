@@ -44,7 +44,7 @@ class Frigidaire:
 
     def __init__(self, username: str, password: str, session_key: Optional[str] = None):
         """
-        Initializes a new instance of the Frigidaire API
+        Initializes a new instance of the Frigidaire API and authenticates against it
         :param username: The username to login to Frigidaire. Generally, this is an email
         :param password: The password to login to Frigidaire
         :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
@@ -54,6 +54,15 @@ class Frigidaire:
         self.password = password
         self.device_id: str = str(uuid.uuid4())
         self.session_key: Optional[str] = session_key
+
+        self.authenticate()
+
+    def test_connection(self) -> None:
+        """
+        Tests for successful connectivity to the Frigidaire server
+        :return:
+        """
+        self.get_request("/config-files/haclmap/latest_version")
 
     def authenticate(self) -> None:
         """
@@ -67,7 +76,7 @@ class Frigidaire:
         if self.session_key:
             logging.debug('Authentication requested but session key is present, testing session key')
             try:
-                self.get_appliances()
+                self.test_connection()
                 logging.debug('Session key is still valid, doing nothing')
                 return None
             except (FrigidaireAPIException, ConnectionError):
@@ -93,9 +102,12 @@ class Frigidaire:
 
     def get_appliances(self) -> List[Appliance]:
         """
-        Uses the Frigidaire API to fetch the list of appliances
+        Uses the Frigidaire API to fetch the list of appliances.
+        Will authenticate if not already authenticated.
         :return: The appliances that are associated with the Frigidaire account
         """
+        self.authenticate()
+
         logging.debug('Listing appliances')
         appliances = self.get_request(
             f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=false'
@@ -105,13 +117,25 @@ class Frigidaire:
     def get_appliance_details(self, appliance: Appliance) -> List[ApplianceDetail]:
         """
         Uses the Frigidaire API to fetch details for a given appliance
+        Will authenticate if not already authenticated
         :param appliance: The appliance to request from the API
         :return: The details for the passed in appliance
         """
+        self.authenticate()
+
         details = self.get_request(f'/elux-ms/appliances/latest?{appliance.query_string}&includeSubcomponents=true')
         return list(map(ApplianceDetail, details))
 
     def execute_action(self, appliance: Appliance, action: List[Component]) -> None:
+        """
+        Executes any defined action on a given appliance
+        Will authenticate if not already authenticated
+        :param appliance: The appliance to perform the action on
+        :param action: The action to be performed
+        :return:
+        """
+        self.authenticate()
+
         data = {
             'components': action,
             'timestamp': str(int(time.time())),

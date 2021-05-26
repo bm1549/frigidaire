@@ -16,22 +16,19 @@ if __name__ == '__main__':
         # session_key,  # uncomment this if testing with an already authenticated session key
     )
 
-    # # login
-    frigidaire.authenticate()
-
-    # # get an arbitrary appliance
+    # get an arbitrary appliance
     appliance = frigidaire.get_appliances()[0]
 
-    # # get some details for it
+    # get some details for it
     appliance_details = frigidaire.get_appliance_details(appliance)
-    #
-    # # turn on
+
+    # turn on
     frigidaire.execute_action(appliance, Action.set_power(Power.ON))
-    #
-    # # set to cool
+
+    # set to cool
     frigidaire.execute_action(appliance, Action.set_mode(Mode.COOL))
-    #
-    # # set fan to medium
+
+    # set fan to medium
     frigidaire.execute_action(appliance, Action.set_fan_speed(FanSpeed.MEDIUM))
 
     # set temperature to 75
