@@ -146,6 +146,7 @@ class Mode(Enum):
 
 
 class FanSpeed(Enum):
+    OFF = 0
     LOW = 1
     MEDIUM = 2
     HIGH = 4
@@ -244,42 +245,60 @@ class Frigidaire:
 
         self.session_key: Optional[str] = auth_response['sessionKey']
 
-    def get_appliances(self) -> List[Appliance]:
+    def re_authenticate(self) -> None:
         """
-        Uses the Frigidaire API to fetch the list of appliances.
-        Will authenticate if not already authenticated.
-        :return: The appliances that are associated with the Frigidaire account
+        Removes the session_key and tries to authenticate again
+        :return:
         """
+        self.session_key = None
         self.authenticate()
 
+    def get_appliances(self) -> List[Appliance]:
+        """
+        Uses the Frigidaire API to fetch the list of appliances
+        Will authenticate if the request fails
+        :return: The appliances that are associated with the Frigidaire account
+        """
         logging.debug('Listing appliances')
-        appliances = self.get_request(
-            f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=false'
-        )
-        return list(map(Appliance, appliances))
+
+        try:
+            appliances = self.get_request(
+                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=false'
+            )
+            return list(map(Appliance, appliances))
+        except FrigidaireException:
+            logging.debug('Listing appliances failed - attempting to re-authenticate')
+            self.re_authenticate()
+            appliances = self.get_request(
+                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=false'
+            )
+            return list(map(Appliance, appliances))
 
     def get_appliance_details(self, appliance: Appliance) -> ApplianceDetails:
         """
         Uses the Frigidaire API to fetch details for a given appliance
-        Will authenticate if not already authenticated
+        Will authenticate if the request fails
         :param appliance: The appliance to request from the API
         :return: The details for the passed in appliance
         """
-        self.authenticate()
+        logging.debug(f'Getting appliance details for appliance {appliance.nickname}')
 
-        details = self.get_request(f'/elux-ms/appliances/latest?{appliance.query_string}&includeSubcomponents=true')
-        return ApplianceDetails(list(map(ApplianceDetail, details)))
+        try:
+            details = self.get_request(f'/elux-ms/appliances/latest?{appliance.query_string}&includeSubcomponents=true')
+            return ApplianceDetails(list(map(ApplianceDetail, details)))
+        except FrigidaireException:
+            self.re_authenticate()
+            details = self.get_request(f'/elux-ms/appliances/latest?{appliance.query_string}&includeSubcomponents=true')
+            return ApplianceDetails(list(map(ApplianceDetail, details)))
 
     def execute_action(self, appliance: Appliance, action: List[Component]) -> None:
         """
         Executes any defined action on a given appliance
-        Will authenticate if not already authenticated
+        Will authenticate if the request fails
         :param appliance: The appliance to perform the action on
         :param action: The action to be performed
         :return:
         """
-        self.authenticate()
-
         data = {
             'components': action,
             'timestamp': str(int(time.time())),
@@ -289,7 +308,11 @@ class Frigidaire:
             'destination': 'AC1',
         }
 
-        self.post_request(f'/commander/remote/sendjson?{appliance.query_string}', data)
+        try:
+            self.post_request(f'/commander/remote/sendjson?{appliance.query_string}', data)
+        except FrigidaireException:
+            self.re_authenticate()
+            self.post_request(f'/commander/remote/sendjson?{appliance.query_string}', data)
 
     @property
     def headers(self):

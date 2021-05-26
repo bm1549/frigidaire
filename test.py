@@ -15,6 +15,9 @@ if __name__ == '__main__':
         # session_key,  # uncomment this if testing with an already authenticated session key
     )
 
+    # tests connectivity
+    frigidaire.test_connection()
+
     # get appliances
     appliances = frigidaire.get_appliances()
 
@@ -35,6 +38,9 @@ if __name__ == '__main__':
 
     # set temperature to 75
     frigidaire.execute_action(appliance, Action.set_temperature(75))
+
+    # re-authenticate the connection to get a new session_key
+    frigidaire.re_authenticate()
 
     # turn off
     frigidaire.execute_action(appliance, Action.set_power(Power.OFF))
