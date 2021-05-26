@@ -19,54 +19,65 @@ class FrigidaireException(Exception):
     pass
 
 
-class Component(dict):
-    def __init__(self, name: str, value: Union[int, str]):
-        dict.__init__(self, name=name, value=value)
+class HaclCode(Enum):
+    CONNECTIVITY_STATE = "0000"
+    APPLIANCE_SERIAL_NUMBER = "0002"
+    CONNECTIVITY_NODE_SW_VERSION = "0011"
+    LINK_QUALITY_INDICATOR = "0032"
+    NETWORK_NAME = "0070"
+    APPLIANCE_STATE = "0401"
+    POWER_MODE = "0403"
+    TEMPERATURE_REPRESENTATION = "0420"
+    SLEEP_MODE = "0428"
+    AMBIENT_TEMPERATURE = "0430"
+    TARGET_TEMPERATURE = "0432"
+    COMPRESSOR_STATE = "04A1"
+    ALERT_EVENT = "0470"
+    AC_MODE = "1000"
+    AC_FAN_SPEED_SETTING = "1002"
+    AC_FAN_SPEED_STATE = "1003"
+    AC_CLEAN_AIR_MODE = "1004"
+    AC_CLEAN_FILTER_ALERT = "1021"
+    AC_COMPRESSOR_COOLING_TIME = "1030"
+    AC_COMPRESSOR_HEATING_RUNTIME = "1031"
+    AC_ELECTRIC_HEATER_RUNTIME = "1032"
+    AC_SCHEDULER_MODE = "1050"
+    AC_SCHEDULER_EVENT_COUNT = "1052"
+    AC_SCHEDULER_EVENT_SUNDAY = "1053"
+    AC_SCHEDULER_EVENT_MONDAY = "1054"
+    AC_SCHEDULER_EVENT_TUESDAY = "1055"
+    AC_SCHEDULER_EVENT_WEDNESDAY = "1056"
+    AC_SCHEDULER_EVENT_THURSDAY = "1057"
+    AC_SCHEDULER_EVENT_FRIDAY = "1058"
+    AC_SCHEDULER_EVENT_SATURDAY = "1059"
+    AC_SCHEDULER_EVENT_ONE_TIME = "105A"
 
 
-class Power(Enum):
-    ON = 1
-    OFF = 0
+class ContainerId(Enum):
+    COEFFICIENT = "1"
+    EXPONENT = "3"
+    UNIT = "0"
+
+    # This isn't the 'real' name, but it makes way more sense
+    TEMPERATURE = COEFFICIENT
 
 
-class Mode(Enum):
-    COOL = 1
-    FAN = 3
-    ECO = 4
+class ApplianceDetailContainer:
+    def __init__(self, args: Dict):
+        self.property_name: str = args['propertyName']
+        self.t_id: str = args['tId']
+        self.group: int = args['group']
+        self.number_value: int = args['numberValue']
+        self.translation: str = args['translation']
 
 
-class FanSpeed(Enum):
-    LOW = 1
-    MEDIUM = 2
-    HIGH = 4
-    AUTO = 7
+class ApplianceDetailContainers:
+    def __init__(self, application_detail_containers: List[ApplianceDetailContainer]):
+        self.application_detail_containers: Dict = {container.t_id: container for container in
+                                                    application_detail_containers}
 
-
-class Action:
-    @classmethod
-    def set_power(cls, power: Power) -> List[Component]:
-        return [Component("0403", power.value)]
-
-    @classmethod
-    def set_mode(cls, mode: Mode) -> List[Component]:
-        return [Component("1000", mode.value)]
-
-    @classmethod
-    def set_fan_speed(cls, fan_speed: FanSpeed) -> List[Component]:
-        return [Component("1002", fan_speed.value)]
-
-    @classmethod
-    def set_temperature(cls, temperature: int) -> List[Component]:
-        # This is a restriction set by Frigidaire
-        if temperature < 60 or temperature > 90:
-            raise FrigidaireException("Temperature must be between 60 and 90 degrees, inclusive")
-
-        return [
-            Component("0432", "Container"),
-            Component("1", temperature),  # This is the actual temperature, the rest is some required nonsense
-            Component("3", 0),
-            Component("0", 1),
-        ]
+    def for_id(self, container_id: ContainerId):
+        return self.application_detail_containers.get(container_id.value)
 
 
 class ApplianceDetail:
@@ -77,16 +88,16 @@ class ApplianceDetail:
         self.description: str = args['description']
         self.hacl_code: str = args['haclCode']
         self.source: str = args['source']
-        self.containers: List[ApplianceDetailContainer] = list(map(ApplianceDetailContainer, args['containers']))
+        self.containers: ApplianceDetailContainers = ApplianceDetailContainers(
+            list(map(ApplianceDetailContainer, args['containers'])))
 
 
-class ApplianceDetailContainer:
-    def __init__(self, args: Dict):
-        self.property_name: str = args['propertyName']
-        self.t_id: str = args['tId']
-        self.group: int = args['group']
-        self.number_value: int = args['numberValue']
-        self.translation: str = args['translation']
+class ApplianceDetails:
+    def __init__(self, appliance_details: List[ApplianceDetail]):
+        self.appliance_details: Dict = {detail.hacl_code: detail for detail in appliance_details}
+
+    def for_code(self, hacl_code: HaclCode) -> Optional[ApplianceDetail]:
+        return self.appliance_details.get(hacl_code.value)
 
 
 class Appliance:
@@ -110,6 +121,63 @@ class Appliance:
         ]
 
         return '&'.join(params)
+
+
+class Component(dict):
+    def __init__(self, name: str, value: Union[int, str]):
+        dict.__init__(self, name=name, value=value)
+
+
+class Unit(Enum):
+    FAHRENHEIT = "Fahrenheit"
+    CELSIUS = "Celsius"
+
+
+class Power(Enum):
+    ON = 1
+    OFF = 0
+
+
+class Mode(Enum):
+    OFF = 0
+    COOL = 1
+    FAN = 3
+    ECO = 4
+
+
+class FanSpeed(Enum):
+    LOW = 1
+    MEDIUM = 2
+    HIGH = 4
+    AUTO = 7
+
+
+class Action:
+    @classmethod
+    def set_power(cls, power: Power) -> List[Component]:
+        return [Component(HaclCode.POWER_MODE.value, power.value)]
+
+    @classmethod
+    def set_mode(cls, mode: Mode) -> List[Component]:
+        return [Component(HaclCode.AC_MODE.value, mode.value)]
+
+    @classmethod
+    def set_fan_speed(cls, fan_speed: FanSpeed) -> List[Component]:
+        return [Component(HaclCode.AC_FAN_SPEED_SETTING.value, fan_speed.value)]
+
+    @classmethod
+    def set_temperature(cls, temperature: int) -> List[Component]:
+        # This is a restriction set by Frigidaire
+        if temperature < 60 or temperature > 90:
+            raise FrigidaireException("Temperature must be between 60 and 90 degrees, inclusive")
+
+        return [
+            Component(HaclCode.TARGET_TEMPERATURE.value, "Container"),
+            Component(ContainerId.COEFFICIENT.value, temperature),
+            # This is the actual temperature, the rest is some required nonsense
+            Component(ContainerId.EXPONENT.value, 0),
+            Component(ContainerId.UNIT.value, 1),
+        ]
 
 
 class Frigidaire:
@@ -190,7 +258,7 @@ class Frigidaire:
         )
         return list(map(Appliance, appliances))
 
-    def get_appliance_details(self, appliance: Appliance) -> List[ApplianceDetail]:
+    def get_appliance_details(self, appliance: Appliance) -> ApplianceDetails:
         """
         Uses the Frigidaire API to fetch details for a given appliance
         Will authenticate if not already authenticated
@@ -200,7 +268,7 @@ class Frigidaire:
         self.authenticate()
 
         details = self.get_request(f'/elux-ms/appliances/latest?{appliance.query_string}&includeSubcomponents=true')
-        return list(map(ApplianceDetail, details))
+        return ApplianceDetails(list(map(ApplianceDetail, details)))
 
     def execute_action(self, appliance: Appliance, action: List[Component]) -> None:
         """
@@ -239,7 +307,8 @@ class Frigidaire:
             'authorization': 'Basic dXNlcjpwYXNz',
         }
 
-    def parse_response(self, response: Response) -> Dict:
+    @staticmethod
+    def parse_response(response: Response) -> Dict:
         """
         Parses a response from the Frigidaire API
         :param response: The raw response from the requests lib

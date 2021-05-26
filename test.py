@@ -15,8 +15,11 @@ if __name__ == '__main__':
         # session_key,  # uncomment this if testing with an already authenticated session key
     )
 
-    # get an arbitrary appliance
-    appliance = frigidaire.get_appliances()[0]
+    # get appliances
+    appliances = frigidaire.get_appliances()
+
+    # pick one arbitrarily
+    appliance = appliances[0]
 
     # get some details for it
     appliance_details = frigidaire.get_appliance_details(appliance)
