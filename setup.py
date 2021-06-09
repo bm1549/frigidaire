@@ -9,6 +9,7 @@ setuptools.setup(
     version='0.8',
     author="Brian Marks",
     description="Python API for the Frigidaire 2.0 App",
+    license="MIT",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/bm1549/frigidaire",
