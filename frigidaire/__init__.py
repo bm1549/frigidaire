@@ -6,8 +6,13 @@ from typing import Optional, Dict, Union, List
 import json
 import logging
 import requests
+import urllib3
 import uuid
 import time
+
+# Frigidaire uses a self-signed certificate, which forces us to disable SSL verification
+# To keep our logs free of spam, we disable warnings on insecure requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 API_URL = 'https://api.latam.ecp.electrolux.com'
 
