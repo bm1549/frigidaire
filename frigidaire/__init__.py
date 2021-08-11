@@ -192,18 +192,20 @@ class Frigidaire:
     This was reverse-engineered from the Frigidaire 2.0 App
     """
 
-    def __init__(self, username: str, password: str, session_key: Optional[str] = None):
+    def __init__(self, username: str, password: str, session_key: Optional[str] = None, timeout: Optional[float] = None):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
         :param username: The username to login to Frigidaire. Generally, this is an email
         :param password: The password to login to Frigidaire
         :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
                             authentication is required
+        :param timeout: The amount of time in seconds to wait before timing out a request
         """
         self.username = username
         self.password = password
         self.device_id: str = str(uuid.uuid4())
         self.session_key: Optional[str] = session_key
+        self.timeout: Optional[float] = timeout
 
         self.authenticate()
 
@@ -358,7 +360,7 @@ class Frigidaire:
         :param path: The path to the resource, including query params
         :return: The contents of 'data' in the resulting json
         """
-        response = requests.get(f'{API_URL}{path}', headers=self.headers, verify=False)
+        response = requests.get(f'{API_URL}{path}', headers=self.headers, verify=False, timeout=self.timeout)
         return self.parse_response(response)
 
     def post_request(self, path: str, data: Dict) -> Union[Dict, List]:
@@ -368,5 +370,5 @@ class Frigidaire:
         :param data: The data to include in the body of the request
         :return: The contents of 'data' in the resulting json
         """
-        response = requests.post(f'{API_URL}{path}', data=json.dumps(data), headers=self.headers, verify=False)
+        response = requests.post(f'{API_URL}{path}', data=json.dumps(data), headers=self.headers, verify=False, timeout=self.timeout)
         return self.parse_response(response)

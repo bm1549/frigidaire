@@ -13,6 +13,7 @@ if __name__ == '__main__':
         username,
         password,
         # session_key,  # uncomment this if testing with an already authenticated session key
+        # timeout=5,  # uncomment this if testing the request timeout
     )
 
     # tests connectivity
