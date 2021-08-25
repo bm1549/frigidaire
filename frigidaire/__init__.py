@@ -179,7 +179,7 @@ class Action:
     @classmethod
     def set_humidity(cls, humidity: int) -> List[Component]:
         if humidity < 35 or humidity > 85:
-            raise FrigidaireException("Humidity must be between 60 and 90 degrees, inclusive")
+            raise FrigidaireException("Humidity must be between 35 and 85 percent, inclusive")
 
         return [Component(HaclCode.TARGET_HUMIDITY.value, humidity)]
 
