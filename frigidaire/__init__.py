@@ -35,7 +35,9 @@ class HaclCode(Enum):
     TEMPERATURE_REPRESENTATION = "0420"
     SLEEP_MODE = "0428"
     AMBIENT_TEMPERATURE = "0430"
+    AMBIENT_HUMIDITY = "04EB"
     TARGET_TEMPERATURE = "0432"
+    TARGET_HUMIDITY = "04EA"
     COMPRESSOR_STATE = "04A1"
     ALERT_EVENT = "0470"
     AC_MODE = "1000"
@@ -148,6 +150,9 @@ class Mode(Enum):
     COOL = 1
     FAN = 3
     ECO = 4
+    # Dehumidifier
+    DRY = 5
+    CONTINUOUS = 8
 
 
 class FanSpeed(Enum):
@@ -170,6 +175,13 @@ class Action:
     @classmethod
     def set_fan_speed(cls, fan_speed: FanSpeed) -> List[Component]:
         return [Component(HaclCode.AC_FAN_SPEED_SETTING.value, fan_speed.value)]
+
+    @classmethod
+    def set_humidity(cls, humidity: int) -> List[Component]:
+        if humidity < 35 or humidity > 85:
+            raise FrigidaireException("Humidity must be between 60 and 90 degrees, inclusive")
+
+        return [Component(HaclCode.TARGET_HUMIDITY.value, humidity)]
 
     @classmethod
     def set_temperature(cls, temperature: int) -> List[Component]:
@@ -312,7 +324,9 @@ class Frigidaire:
             'operationMode': 'EXE',
             'version': 'ad',
             'source': 'RP1',
-            'destination': 'AC1',
+            # This needs to be DH1 for dehumidifiersr, and AC1 for air conditioners
+            # Maybe switch to pulling this out of the appliance_details
+            'destination': 'DH1',
         }
 
         try:
