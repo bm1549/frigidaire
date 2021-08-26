@@ -24,6 +24,13 @@ class FrigidaireException(Exception):
     pass
 
 
+class ApplianceClass(Enum):
+    # The second digit in the serial number indicates appliance class
+    # https://www.electrical-forensics.com/MajorAppliances/ElectroluxDateCodes.html
+    AIR_CONDITIONER = "K"
+    DEHUMIDIFIER = "N"
+
+
 class HaclCode(Enum):
     CONNECTIVITY_STATE = "0000"
     APPLIANCE_SERIAL_NUMBER = "0002"
@@ -109,6 +116,10 @@ class ApplianceDetails:
 
 class Appliance:
     def __init__(self, args: Dict):
+        try:
+            self.appliance_class: ApplianceClass = ApplianceClass(args['fields']['NASerialNumber'][1])
+        except (KeyError, ValueError) as exc:
+            raise FrigidaireException(f'Unknown appliance class for appliance: {args}') from exc
         self.appliance_type: str = args['appliance_type']
         self.appliance_id: str = args['appliance_id']
         self.pnc: str = args['pnc']
@@ -284,14 +295,14 @@ class Frigidaire:
 
         try:
             appliances = self.get_request(
-                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=false'
+                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=true'
             )
             return list(map(Appliance, appliances))
         except FrigidaireException:
             logging.debug('Listing appliances failed - attempting to re-authenticate')
             self.re_authenticate()
             appliances = self.get_request(
-                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=false'
+                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=true'
             )
             return list(map(Appliance, appliances))
 
@@ -326,10 +337,11 @@ class Frigidaire:
             'operationMode': 'EXE',
             'version': 'ad',
             'source': 'RP1',
-            # This needs to be DH1 for dehumidifiersr, and AC1 for air conditioners
-            # Maybe switch to pulling this out of the appliance_details
-            'destination': 'DH1',
         }
+        if appliance.appliance_class == ApplianceClass.AIR_CONDITIONER:
+            data['destination'] = 'AC1'
+        elif appliance.appliance_class == ApplianceClass.DEHUMIDIFIER:
+            data['destination'] = 'DH1'
 
         try:
             self.post_request(f'/commander/remote/sendjson?{appliance.query_string}', data)
