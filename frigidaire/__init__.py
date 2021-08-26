@@ -24,6 +24,20 @@ class FrigidaireException(Exception):
     pass
 
 
+class ApplianceClass(Enum):
+    AIR_CONDITIONER = "K"
+    DEHUMIDIFIER = "N"
+
+    @property
+    def destination(self) -> str:
+        if self == ApplianceClass.AIR_CONDITIONER:
+            return 'AC1'
+        elif self == ApplianceClass.DEHUMIDIFIER:
+            return 'DH1'
+        else:
+            raise FrigidaireException(f'Destination field needs to be set for class {self}')
+
+
 class HaclCode(Enum):
     CONNECTIVITY_STATE = "0000"
     APPLIANCE_SERIAL_NUMBER = "0002"
@@ -36,8 +50,10 @@ class HaclCode(Enum):
     SLEEP_MODE = "0428"
     AMBIENT_TEMPERATURE = "0430"
     TARGET_TEMPERATURE = "0432"
-    COMPRESSOR_STATE = "04A1"
     ALERT_EVENT = "0470"
+    COMPRESSOR_STATE = "04A1"
+    TARGET_HUMIDITY = "04EA"
+    AMBIENT_HUMIDITY = "04EB"
     AC_MODE = "1000"
     AC_FAN_SPEED_SETTING = "1002"
     AC_FAN_SPEED_STATE = "1003"
@@ -107,6 +123,12 @@ class ApplianceDetails:
 
 class Appliance:
     def __init__(self, args: Dict):
+        # The second digit in the serial number indicates appliance class
+        # https://www.electrical-forensics.com/MajorAppliances/ElectroluxDateCodes.html
+        try:
+            self.appliance_class: ApplianceClass = ApplianceClass(args['fields']['NASerialNumber'][1])
+        except (KeyError, ValueError) as exc:
+            raise FrigidaireException(f'Unknown appliance class for appliance: {args}') from exc
         self.appliance_type: str = args['appliance_type']
         self.appliance_id: str = args['appliance_id']
         self.pnc: str = args['pnc']
@@ -144,13 +166,18 @@ class Power(Enum):
 
 
 class Mode(Enum):
+    # Air Conditioner
     OFF = 0
     COOL = 1
     FAN = 3
     ECO = 4
+    # Dehumidifier
+    DRY = 5
+    CONTINUOUS = 8
 
 
 class FanSpeed(Enum):
+    # Only HIGH and LOW apply to dehumidifiers
     OFF = 0
     LOW = 1
     MEDIUM = 2
@@ -170,6 +197,13 @@ class Action:
     @classmethod
     def set_fan_speed(cls, fan_speed: FanSpeed) -> List[Component]:
         return [Component(HaclCode.AC_FAN_SPEED_SETTING.value, fan_speed.value)]
+
+    @classmethod
+    def set_humidity(cls, humidity: int) -> List[Component]:
+        if humidity < 35 or humidity > 85:
+            raise FrigidaireException("Humidity must be between 35 and 85 percent, inclusive")
+
+        return [Component(HaclCode.TARGET_HUMIDITY.value, humidity)]
 
     @classmethod
     def set_temperature(cls, temperature: int) -> List[Component]:
@@ -270,14 +304,14 @@ class Frigidaire:
 
         try:
             appliances = self.get_request(
-                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=false'
+                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=true'
             )
             return list(map(Appliance, appliances))
         except FrigidaireException:
             logging.debug('Listing appliances failed - attempting to re-authenticate')
             self.re_authenticate()
             appliances = self.get_request(
-                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=false'
+                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=true'
             )
             return list(map(Appliance, appliances))
 
@@ -312,7 +346,7 @@ class Frigidaire:
             'operationMode': 'EXE',
             'version': 'ad',
             'source': 'RP1',
-            'destination': 'AC1',
+            'destination': appliance.appliance_class.destination,
         }
 
         try:
