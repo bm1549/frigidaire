@@ -146,6 +146,7 @@ class Power(Enum):
 
 
 class Mode(Enum):
+    # Air Conditioner
     OFF = 0
     COOL = 1
     FAN = 3
@@ -156,6 +157,7 @@ class Mode(Enum):
 
 
 class FanSpeed(Enum):
+    # Only HIGH and LOW apply to dehumidifiers
     OFF = 0
     LOW = 1
     MEDIUM = 2
