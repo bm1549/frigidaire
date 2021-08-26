@@ -25,10 +25,17 @@ class FrigidaireException(Exception):
 
 
 class ApplianceClass(Enum):
-    # The second digit in the serial number indicates appliance class
-    # https://www.electrical-forensics.com/MajorAppliances/ElectroluxDateCodes.html
     AIR_CONDITIONER = "K"
     DEHUMIDIFIER = "N"
+
+    @property
+    def destination(self) -> str:
+        if self == ApplianceClass.AIR_CONDITIONER:
+            return 'AC1'
+        elif self == ApplianceClass.DEHUMIDIFIER:
+            return 'DH1'
+        else:
+            raise FrigidaireException(f'Destination field needs to be set for class {self}')
 
 
 class HaclCode(Enum):
@@ -116,6 +123,8 @@ class ApplianceDetails:
 
 class Appliance:
     def __init__(self, args: Dict):
+        # The second digit in the serial number indicates appliance class
+        # https://www.electrical-forensics.com/MajorAppliances/ElectroluxDateCodes.html
         try:
             self.appliance_class: ApplianceClass = ApplianceClass(args['fields']['NASerialNumber'][1])
         except (KeyError, ValueError) as exc:
@@ -337,11 +346,8 @@ class Frigidaire:
             'operationMode': 'EXE',
             'version': 'ad',
             'source': 'RP1',
+            'destination': appliance.appliance_class.destination,
         }
-        if appliance.appliance_class == ApplianceClass.AIR_CONDITIONER:
-            data['destination'] = 'AC1'
-        elif appliance.appliance_class == ApplianceClass.DEHUMIDIFIER:
-            data['destination'] = 'DH1'
 
         try:
             self.post_request(f'/commander/remote/sendjson?{appliance.query_string}', data)
