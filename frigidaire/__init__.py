@@ -185,6 +185,11 @@ class FanSpeed(Enum):
     AUTO = 7
 
 
+class ConnectivityState(Enum):
+    CONNECTED = 'connect'
+    DISCONNECTED = 'disconnect'
+
+
 class Action:
     @classmethod
     def set_power(cls, power: Power) -> List[Component]:
