@@ -112,6 +112,13 @@ class ApplianceDetail:
         self.containers: ApplianceDetailContainers = ApplianceDetailContainers(
             list(map(ApplianceDetailContainer, args['containers'])))
 
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return self.number_value == other
+        elif isinstance(other, str):
+            return self.string_value == other
+        return super().__eq__(other)
+
 
 class ApplianceDetails:
     def __init__(self, appliance_details: List[ApplianceDetail]):
