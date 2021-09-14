@@ -38,7 +38,7 @@ class ApplianceClass(Enum):
             raise FrigidaireException(f'Destination field needs to be set for class {self}')
 
 
-class HaclCode(Enum):
+class HaclCode(str, Enum):
     CONNECTIVITY_STATE = "0000"
     APPLIANCE_SERIAL_NUMBER = "0002"
     CONNECTIVITY_NODE_SW_VERSION = "0011"
@@ -74,7 +74,7 @@ class HaclCode(Enum):
     AC_SCHEDULER_EVENT_ONE_TIME = "105A"
 
 
-class ContainerId(Enum):
+class ContainerId(str, Enum):
     COEFFICIENT = "1"
     EXPONENT = "3"
     UNIT = "0"
@@ -155,17 +155,17 @@ class Component(dict):
         dict.__init__(self, name=name, value=value)
 
 
-class Unit(Enum):
+class Unit(str, Enum):
     FAHRENHEIT = "Fahrenheit"
     CELSIUS = "Celsius"
 
 
-class Power(Enum):
+class Power(int, Enum):
     ON = 1
     OFF = 0
 
 
-class Mode(Enum):
+class Mode(int, Enum):
     # Air Conditioner
     OFF = 0
     COOL = 1
@@ -176,7 +176,7 @@ class Mode(Enum):
     CONTINUOUS = 8
 
 
-class FanSpeed(Enum):
+class FanSpeed(int, Enum):
     # Only HIGH and LOW apply to dehumidifiers
     OFF = 0
     LOW = 1
@@ -185,7 +185,7 @@ class FanSpeed(Enum):
     AUTO = 7
 
 
-class ConnectivityState(Enum):
+class ConnectivityState(str, Enum):
     CONNECTED = 'connect'
     DISCONNECTED = 'disconnect'
 
