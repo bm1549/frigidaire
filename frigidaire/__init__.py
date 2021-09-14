@@ -38,7 +38,7 @@ class ApplianceClass(Enum):
             raise FrigidaireException(f'Destination field needs to be set for class {self}')
 
 
-class HaclCode(Enum):
+class HaclCode(str, Enum):
     CONNECTIVITY_STATE = "0000"
     APPLIANCE_SERIAL_NUMBER = "0002"
     CONNECTIVITY_NODE_SW_VERSION = "0011"
@@ -74,7 +74,7 @@ class HaclCode(Enum):
     AC_SCHEDULER_EVENT_ONE_TIME = "105A"
 
 
-class ContainerId(Enum):
+class ContainerId(str, Enum):
     COEFFICIENT = "1"
     EXPONENT = "3"
     UNIT = "0"
@@ -98,7 +98,7 @@ class ApplianceDetailContainers:
                                                     application_detail_containers}
 
     def for_id(self, container_id: ContainerId):
-        return self.application_detail_containers.get(container_id.value)
+        return self.application_detail_containers.get(container_id)
 
 
 class ApplianceDetail:
@@ -112,13 +112,20 @@ class ApplianceDetail:
         self.containers: ApplianceDetailContainers = ApplianceDetailContainers(
             list(map(ApplianceDetailContainer, args['containers'])))
 
+    def __eq__(self, other):
+        if isinstance(other, int):
+            return self.number_value == other
+        elif isinstance(other, str):
+            return self.string_value == other
+        return super().__eq__(other)
+
 
 class ApplianceDetails:
     def __init__(self, appliance_details: List[ApplianceDetail]):
         self.appliance_details: Dict = {detail.hacl_code: detail for detail in appliance_details}
 
     def for_code(self, hacl_code: HaclCode) -> Optional[ApplianceDetail]:
-        return self.appliance_details.get(hacl_code.value)
+        return self.appliance_details.get(hacl_code)
 
 
 class Appliance:
@@ -155,17 +162,17 @@ class Component(dict):
         dict.__init__(self, name=name, value=value)
 
 
-class Unit(Enum):
+class Unit(str, Enum):
     FAHRENHEIT = "Fahrenheit"
     CELSIUS = "Celsius"
 
 
-class Power(Enum):
+class Power(int, Enum):
     ON = 1
     OFF = 0
 
 
-class Mode(Enum):
+class Mode(int, Enum):
     # Air Conditioner
     OFF = 0
     COOL = 1
@@ -176,7 +183,7 @@ class Mode(Enum):
     CONTINUOUS = 8
 
 
-class FanSpeed(Enum):
+class FanSpeed(int, Enum):
     # Only HIGH and LOW apply to dehumidifiers
     OFF = 0
     LOW = 1
@@ -185,7 +192,7 @@ class FanSpeed(Enum):
     AUTO = 7
 
 
-class ConnectivityState(Enum):
+class ConnectivityState(str, Enum):
     CONNECTED = 'connect'
     DISCONNECTED = 'disconnect'
 
@@ -193,22 +200,22 @@ class ConnectivityState(Enum):
 class Action:
     @classmethod
     def set_power(cls, power: Power) -> List[Component]:
-        return [Component(HaclCode.POWER_MODE.value, power.value)]
+        return [Component(HaclCode.POWER_MODE, power)]
 
     @classmethod
     def set_mode(cls, mode: Mode) -> List[Component]:
-        return [Component(HaclCode.AC_MODE.value, mode.value)]
+        return [Component(HaclCode.AC_MODE, mode)]
 
     @classmethod
     def set_fan_speed(cls, fan_speed: FanSpeed) -> List[Component]:
-        return [Component(HaclCode.AC_FAN_SPEED_SETTING.value, fan_speed.value)]
+        return [Component(HaclCode.AC_FAN_SPEED_SETTING, fan_speed)]
 
     @classmethod
     def set_humidity(cls, humidity: int) -> List[Component]:
         if humidity < 35 or humidity > 85:
             raise FrigidaireException("Humidity must be between 35 and 85 percent, inclusive")
 
-        return [Component(HaclCode.TARGET_HUMIDITY.value, humidity)]
+        return [Component(HaclCode.TARGET_HUMIDITY, humidity)]
 
     @classmethod
     def set_temperature(cls, temperature: int) -> List[Component]:
@@ -217,11 +224,11 @@ class Action:
             raise FrigidaireException("Temperature must be between 60 and 90 degrees, inclusive")
 
         return [
-            Component(HaclCode.TARGET_TEMPERATURE.value, "Container"),
-            Component(ContainerId.COEFFICIENT.value, temperature),
+            Component(HaclCode.TARGET_TEMPERATURE, "Container"),
+            Component(ContainerId.COEFFICIENT, temperature),
             # This is the actual temperature, the rest is some required nonsense
-            Component(ContainerId.EXPONENT.value, 0),
-            Component(ContainerId.UNIT.value, 1),
+            Component(ContainerId.EXPONENT, 0),
+            Component(ContainerId.UNIT, 1),
         ]
 
 
