@@ -98,7 +98,7 @@ class ApplianceDetailContainers:
                                                     application_detail_containers}
 
     def for_id(self, container_id: ContainerId):
-        return self.application_detail_containers.get(container_id.value)
+        return self.application_detail_containers.get(container_id)
 
 
 class ApplianceDetail:
@@ -125,7 +125,7 @@ class ApplianceDetails:
         self.appliance_details: Dict = {detail.hacl_code: detail for detail in appliance_details}
 
     def for_code(self, hacl_code: HaclCode) -> Optional[ApplianceDetail]:
-        return self.appliance_details.get(hacl_code.value)
+        return self.appliance_details.get(hacl_code)
 
 
 class Appliance:
@@ -200,22 +200,22 @@ class ConnectivityState(str, Enum):
 class Action:
     @classmethod
     def set_power(cls, power: Power) -> List[Component]:
-        return [Component(HaclCode.POWER_MODE.value, power.value)]
+        return [Component(HaclCode.POWER_MODE, power)]
 
     @classmethod
     def set_mode(cls, mode: Mode) -> List[Component]:
-        return [Component(HaclCode.AC_MODE.value, mode.value)]
+        return [Component(HaclCode.AC_MODE, mode)]
 
     @classmethod
     def set_fan_speed(cls, fan_speed: FanSpeed) -> List[Component]:
-        return [Component(HaclCode.AC_FAN_SPEED_SETTING.value, fan_speed.value)]
+        return [Component(HaclCode.AC_FAN_SPEED_SETTING, fan_speed)]
 
     @classmethod
     def set_humidity(cls, humidity: int) -> List[Component]:
         if humidity < 35 or humidity > 85:
             raise FrigidaireException("Humidity must be between 35 and 85 percent, inclusive")
 
-        return [Component(HaclCode.TARGET_HUMIDITY.value, humidity)]
+        return [Component(HaclCode.TARGET_HUMIDITY, humidity)]
 
     @classmethod
     def set_temperature(cls, temperature: int) -> List[Component]:
@@ -224,11 +224,11 @@ class Action:
             raise FrigidaireException("Temperature must be between 60 and 90 degrees, inclusive")
 
         return [
-            Component(HaclCode.TARGET_TEMPERATURE.value, "Container"),
-            Component(ContainerId.COEFFICIENT.value, temperature),
+            Component(HaclCode.TARGET_TEMPERATURE, "Container"),
+            Component(ContainerId.COEFFICIENT, temperature),
             # This is the actual temperature, the rest is some required nonsense
-            Component(ContainerId.EXPONENT.value, 0),
-            Component(ContainerId.UNIT.value, 1),
+            Component(ContainerId.EXPONENT, 0),
+            Component(ContainerId.UNIT, 1),
         ]
 
 
