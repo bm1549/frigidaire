@@ -181,7 +181,9 @@ class Mode(int, Enum):
     ECO = 4
     # Dehumidifier
     DRY = 5
+    AUTO = 6
     CONTINUOUS = 8
+    QUIET = 9
 
 
 class FanSpeed(int, Enum):
