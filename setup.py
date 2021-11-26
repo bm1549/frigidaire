@@ -12,7 +12,7 @@ if "--version" in sys.argv:
     sys.argv.pop(idx)
     version = sys.argv.pop(idx)
 
-print("Using version " + version)
+print("Using version " + version) 
 
 setuptools.setup(
     name='frigidaire',
