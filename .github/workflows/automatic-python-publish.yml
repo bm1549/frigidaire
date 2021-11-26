@@ -32,8 +32,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: ${{ steps.previoustag.outputs.tag }}
-        release_name: ${{ steps.previoustag.outputs.tag }}
+        tag_name: ${{ steps.semvers.outputs.patch }}
+        release_name: ${{ steps.semvers.outputs.patch }}
         draft: false
         prerelease: false
     - name: Set up Python
