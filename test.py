@@ -1,3 +1,4 @@
+import configparser
 import logging
 
 from frigidaire import Action, Power, Mode, FanSpeed, Frigidaire, HaclCode, Component
@@ -5,9 +6,20 @@ from frigidaire import Action, Power, Mode, FanSpeed, Frigidaire, HaclCode, Comp
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
 
-    username = 'email@example.com'
-    password = 'password'
-    session_key = 'get_this_from_authenticate'
+    # Create a config file at config.ini to reduce the risk of accidentally committing credentials
+    # You can use the following contents as a starting point
+    """
+    [credentials]
+    Username=email@example.com
+    Password=password
+    """
+    config = configparser.ConfigParser()
+    config.read('config.ini')
+    credentials = config['credentials'] or {}
+
+    username = credentials.get('username')
+    password = credentials.get('password')
+    session_key = credentials.get('session_key', fallback=None)
 
     frigidaire = Frigidaire(
         username,
