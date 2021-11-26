@@ -25,6 +25,7 @@ jobs:
       uses: "WyriHaximus/github-action-next-semvers@v1"
       with:
         version: ${{ steps.previoustag.outputs.tag }}
+        strict: false
     - name: 'Release new tag'
       id: release-snapshot
       uses: actions/create-release@latest
