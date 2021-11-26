@@ -1,12 +1,22 @@
 import setuptools
+import sys
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
+# Default
+version = "SNAPSHOT"
+
+if "--version" in sys.argv:
+    idx = sys.argv.index("--version")
+    sys.argv.pop(idx)
+    version = sys.argv.pop(idx)
+
+print("Using version " + version)
 
 setuptools.setup(
     name='frigidaire',
-    version='0.17',
+    version=version,
     author="Brian Marks",
     description="Python API for the Frigidaire 2.0 App",
     license="MIT",
