@@ -24,18 +24,9 @@ class FrigidaireException(Exception):
     pass
 
 
-class ApplianceClass(Enum):
-    AIR_CONDITIONER = "K"
-    DEHUMIDIFIER = "N"
-
-    @property
-    def destination(self) -> str:
-        if self == ApplianceClass.AIR_CONDITIONER:
-            return 'AC1'
-        elif self == ApplianceClass.DEHUMIDIFIER:
-            return 'DH1'
-        else:
-            raise FrigidaireException(f'Destination field needs to be set for class {self}')
+class Destination(str, Enum):
+    AIR_CONDITIONER = "AC1"
+    DEHUMIDIFIER = "DH1"
 
 
 class HaclCode(str, Enum):
@@ -131,12 +122,6 @@ class ApplianceDetails:
 
 class Appliance:
     def __init__(self, args: Dict):
-        # The second digit in the serial number indicates appliance class
-        # https://www.electrical-forensics.com/MajorAppliances/ElectroluxDateCodes.html
-        try:
-            self.appliance_class: ApplianceClass = ApplianceClass(args['fields']['NASerialNumber'][1])
-        except (KeyError, ValueError) as exc:
-            raise FrigidaireException(f'Unknown appliance class for appliance: {args}') from exc
         self.appliance_type: str = args['appliance_type']
         self.appliance_id: str = args['appliance_id']
         self.pnc: str = args['pnc']
@@ -145,6 +130,8 @@ class Appliance:
         self.mac: str = args['mac']
         self.cpv: str = args['cpv']
         self.nickname: str = args['nickname']
+        # Assume a device is an AC until overridden
+        self.destination = Destination.AIR_CONDITIONER
 
     @property
     def query_string(self) -> str:
@@ -317,18 +304,37 @@ class Frigidaire:
         """
         logging.debug('Listing appliances')
 
-        try:
+        def generate_appliance(raw_appliance: Union[Dict, List]) -> Appliance:
+            """
+            Generates an appliance given a raw_appliance. This will make a second call to the Frigidaire appliance
+            details to figure out what source we should be using. We discard the rest of the response from appliance
+            details since everything else (except for source) is subject to change later on
+            :param raw_appliance: The raw output of the Frigidaire API for the appliance
+            :return: The appliance augmented with a destination
+            """
+            appliance = Appliance(raw_appliance)
+            appliance_details = self.get_appliance_details(appliance)
+            appliance.destination = appliance_details.for_code(HaclCode.AC_MODE).source
+            return appliance
+
+        def get_appliances_inner():
+            """
+            Actually calls the API for Frigidaire and creates an Appliance. This is useful because we'll sometimes need
+            to re-authenticate
+            :return: The appliances that are associated with the Frigidaire account
+            """
             appliances = self.get_request(
                 f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=true'
             )
-            return list(map(Appliance, appliances))
+
+            return list(map(generate_appliance, appliances))
+
+        try:
+            return get_appliances_inner()
         except FrigidaireException:
             logging.debug('Listing appliances failed - attempting to re-authenticate')
             self.re_authenticate()
-            appliances = self.get_request(
-                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=true'
-            )
-            return list(map(Appliance, appliances))
+            return get_appliances_inner()
 
     def get_appliance_details(self, appliance: Appliance) -> ApplianceDetails:
         """
@@ -361,7 +367,7 @@ class Frigidaire:
             'operationMode': 'EXE',
             'version': 'ad',
             'source': 'RP1',
-            'destination': appliance.appliance_class.destination,
+            'destination': appliance.destination,
         }
 
         try:
