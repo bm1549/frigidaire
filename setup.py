@@ -1,16 +1,10 @@
 import setuptools
-import sys
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-# Default
+# Overridden by publish GH Action
 version = "SNAPSHOT"
-
-if "--version" in sys.argv:
-    idx = sys.argv.index("--version")
-    sys.argv.pop(idx)
-    version = sys.argv.pop(idx)
 
 print("Using version " + version)
 
