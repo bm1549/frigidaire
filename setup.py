@@ -23,7 +23,7 @@ setuptools.setup(
         "chardet>=4.0.0",
         "idna>=2.10",
         "requests>=2.25.1",
-        "urllib3>=1.26.42",
+        "urllib3>=1.26.4",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
