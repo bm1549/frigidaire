@@ -7,6 +7,7 @@ on:
   push:
     branches:
       - main
+      - test-publish
 
 jobs:
   deploy:
@@ -48,5 +49,6 @@ jobs:
         TWINE_USERNAME: ${{ secrets.PYPI_USERNAME }}
         TWINE_PASSWORD: ${{ secrets.PYPI_PASSWORD }}
       run: |
-        python setup.py sdist bdist_wheel --version ${{ steps.semvers.outputs.patch }}
+        sed -i '' 's/SNAPSHOT/${{ steps.semvers.outputs.patch }}/' setup.py
+        python setup.py sdist bdist_wheel
         twine upload dist/*
