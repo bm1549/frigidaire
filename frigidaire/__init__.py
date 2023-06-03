@@ -14,7 +14,7 @@ import time
 # To keep our logs free of spam, we disable warnings on insecure requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_URL = 'https://api.us.ecp.electrolux.com/authentication/authenticate'
+API_URL = 'https://api.us.ecp.electrolux.com'
 
 CLIENT_ID = 'Gsdwexj38r1sXSXIPVdxj4DGoU5ZoaI6aW6ZckBI'
 USER_AGENT = 'Frigidaire/81 CFNetwork/1206 Darwin/20.1.0'
