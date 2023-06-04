@@ -14,9 +14,9 @@ import time
 # To keep our logs free of spam, we disable warnings on insecure requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_URL = 'https://api.latam.ecp.electrolux.com'
+API_URL = 'https://api.us.ecp.electrolux.com'
 
-CLIENT_ID = 'e9c4ac73-e94e-4b37-b1fe-b956f568daa0'
+CLIENT_ID = 'Gsdwexj38r1sXSXIPVdxj4DGoU5ZoaI6aW6ZckBI'
 USER_AGENT = 'Frigidaire/81 CFNetwork/1206 Darwin/20.1.0'
 
 
@@ -385,11 +385,12 @@ class Frigidaire:
         return {
             'session_token': self.session_key,
             'x-ibm-client-id': CLIENT_ID,
+            'x-api-key': CLIENT_ID,
             'user-agent': USER_AGENT,
             'content-type': 'application/json',
             'accept': '*/*',
             'accept-language': 'en-us',
-            'authorization': 'Basic dXNlcjpwYXNz',
+            'authorization': 'Basic ' + CLIENT_ID,
         }
 
     @staticmethod
