@@ -209,9 +209,14 @@ class Action:
 
     @classmethod
     def set_temperature(cls, temperature: int) -> List[Component]:
-        # This is a restriction set by Frigidaire
-        if temperature < 60 or temperature > 90:
-            raise FrigidaireException("Temperature must be between 60 and 90 degrees, inclusive")
+        # These are restrictions set by Frigidaire
+        if ContainerId.UNIT == 0:
+            if temperature < 60 or temperature > 90:
+                raise FrigidaireException("Temperature must be between 60 and 90 degrees, inclusive")
+        
+        if ContainerId.UNIT == 1:
+            if temperature < 16 or temperature > 32:
+                raise FrigidaireException("Temperature must be between 16 and 32 degrees, inclusive")
 
         return [
             Component(HaclCode.TARGET_TEMPERATURE, "Container"),
