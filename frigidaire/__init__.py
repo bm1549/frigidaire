@@ -35,7 +35,7 @@ class FrigidaireException(Exception):
 
 class Destination(str, Enum):
     AIR_CONDITIONER = "AC"
-    DEHUMIDIFIER = "DH" # TODO: Not tested
+    DEHUMIDIFIER = "DH"
 
 
 class Setting(str, Enum):
@@ -44,24 +44,35 @@ class Setting(str, Enum):
     These can be passed to the execute_action() API together with a target value
     to change settings.
     """
+
+    # Common
     FAN_SPEED = "fanSpeedSetting"
     EXECUTE_COMMAND = "executeCommand"
     MODE = "mode"
     SLEEP_MODE = "sleepMode"
+    UI_LOCK_MODE = "uiLockMode"
+    VERTICAL_SWING = "verticalSwing"
+
+    # AC
     TARGET_TEMPERATURE_C = "targetTemperatureC"
     TARGET_TEMPERATURE_F = "targetTemperatureF"
     TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
-    UI_LOCK_MODE = "uiLockMode"
-    VERTICAL_SWING = "verticalSwing"
+
+    # Humidifier
+    CLEAN_AIR_MODE = "cleanAirMode"
+    DISPLAY_LIGHT = "displayLight"
+    START_TIME = "startTime"
+    STOP_TIME = "stopTime"
+    TARGET_HUMIDITY = "targetHumidity"
 
 
 class Detail(str, Enum):
     """
     Readable details that are known to be present in some products.
     """
+
+    # Common
     ALERTS = "alerts"
-    AMBIENT_TEMPERATURE_C = "ambientTemperatureC"
-    AMBIENT_TEMPERATURE_F = "ambientTemperatureF"
     APPLIANCE_STATE = "applianceState"
     APPLIANCE_UI_SW_VERSION = "applianceUiSwVersion"
     FAN_SPEED = "fanSpeedSetting"
@@ -69,12 +80,25 @@ class Detail(str, Enum):
     FILTER_STATE = "filterState"
     MODE = "mode"
     NETWORK_INTERFACE = "networkInterface"
+    UI_LOCK_MODE = "uiLockMode"
     SLEEP_MODE = "sleepMode"
+    VERTICAL_SWING = "verticalSwing"
+
+    # AC
+    AMBIENT_TEMPERATURE_C = "ambientTemperatureC"
+    AMBIENT_TEMPERATURE_F = "ambientTemperatureF"
     TARGET_TEMPERATURE_C = "targetTemperatureC"
     TARGET_TEMPERATURE_F = "targetTemperatureF"
     TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
-    UI_LOCK_MODE = "uiLockMode"
-    VERTICAL_SWING = "verticalSwing"
+
+    # Humidifier
+    DISPLAY_LIGHT = "displayLight"
+    CLEAN_AIR_MODE = "cleanAirMode"
+    SENSOR_HUMIDITY = "sensorHumidity"
+    START_TIME = "startTime"
+    STOP_TIME = "stopTime"
+    TARGET_HUMIDITY = "targetHumidity"
+    WATER_BUCKET_LEVEL = "waterBucketLevel"
 
 
 class Appliance:
@@ -105,9 +129,34 @@ class Unit(str, Enum):
     CELSIUS = "CELSIUS"
 
 
+class ApplianceState(str, Enum):
+    OFF = "OFF"
+    RUNNING = "RUNNING"
+
+
+class FilterState(str, Enum):
+    BUY = "BUY"
+    CHANGE = "CHANGE"
+    CLEAN = "CLEAN"
+    GOOD = "GOOD"
+
+
 class Power(str, Enum):
     ON = 'ON'
     OFF = 'OFF'
+
+
+class Alert(str, Enum):
+    BUCKET_FULL = "BUCKET_FULL"
+    BUS_HIGH_VOLTAGE = "BUS_HIGH_VOLTAGE"
+    COMMUNICATION_FAULT = "COMMUNICATION_FAULT"
+    DC_MOTOR_FAULT = "DC_MOTOR_FAULT"
+    DC_MOTOR_LOST_SPEED = "DC_MOTOR_LOST_SPEED"
+    DRAIN_PAN_FULL = "DRAIN_PAN_FULL"
+    INDOOR_DEFROST_THERMISTOR_FAULT = "INDOOR_DEFROST_THERMISTOR_FAULT"
+    PM25_SENSOR_FAULT = "PM25_SENSOR_FAULT"
+    TUBE_HIGH_TEMPERATURE = "TUBE_HIGH_TEMPERATURE"
+    UNKNOWN_STATE_ERROR = "UNKNOWN_STATE_ERROR" 
 
 
 class Mode(str, Enum):
@@ -116,7 +165,7 @@ class Mode(str, Enum):
     COOL = 'COOL'
     FAN = 'FANONLY'
     ECO = 'ECO'
-    # Dehumidifier (TODO: not tested with OCP API, minor tweaks may be required)
+    # Dehumidifier
     DRY = 'DRY'
     AUTO = 'AUTO'
     CONTINUOUS = 'CONTINUOUS'
@@ -124,10 +173,11 @@ class Mode(str, Enum):
 
 
 class FanSpeed(str, Enum):
-    # Only HIGH and LOW apply to dehumidifiers
+    # Common
     LOW = 'LOW'
     MEDIUM = 'MIDDLE'
     HIGH = 'HIGH'
+    # Air Conditioner
     AUTO = 'AUTO'
 
 
@@ -149,7 +199,7 @@ class Action:
         if humidity < 35 or humidity > 85:
             raise FrigidaireException("Humidity must be between 35 and 85 percent, inclusive")
 
-        raise FrigidaireException("Humidity setting not implemented for OCP API (setting key unknown)")
+        return [Component(Setting.TARGET_HUMIDITY, humidity)]
 
     @classmethod
     def set_temperature(cls, temperature: int) -> List[Component]:
