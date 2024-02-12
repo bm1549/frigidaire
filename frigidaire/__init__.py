@@ -192,7 +192,7 @@ class Action:
 
     @classmethod
     def set_fan_speed(cls, fan_speed: FanSpeed) -> List[Component]:
-        return [Component(Setting.FAN_SPEED_SETTING, fan_speed)]
+        return [Component(Setting.FAN_SPEED, fan_speed)]
 
     @classmethod
     def set_humidity(cls, humidity: int) -> List[Component]:
