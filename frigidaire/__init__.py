@@ -11,10 +11,9 @@ import requests
 import urllib3
 from urllib.parse import quote_plus
 from urllib.parse import urlencode
-import uuid
 import time
 
-from  .signature_generator import get_signature
+from .signature_generator import get_signature
 
 # Frigidaire uses a self-signed certificate, which forces us to disable SSL verification
 # To keep our logs free of spam, we disable warnings on insecure requests
@@ -156,7 +155,7 @@ class Alert(str, Enum):
     INDOOR_DEFROST_THERMISTOR_FAULT = "INDOOR_DEFROST_THERMISTOR_FAULT"
     PM25_SENSOR_FAULT = "PM25_SENSOR_FAULT"
     TUBE_HIGH_TEMPERATURE = "TUBE_HIGH_TEMPERATURE"
-    UNKNOWN_STATE_ERROR = "UNKNOWN_STATE_ERROR" 
+    UNKNOWN_STATE_ERROR = "UNKNOWN_STATE_ERROR"
 
 
 class Mode(str, Enum):
@@ -226,11 +225,12 @@ class Frigidaire:
     This was reverse-engineered from the Frigidaire 2.0 App
     """
 
-    def __init__(self, username: str, password: str, session_key: Optional[str] = None, timeout: Optional[float] = None, regional_base_url: Optional[str] = None):
+    def __init__(self, username: str, password: str, session_key: Optional[str] = None, timeout: Optional[float] = None,
+                 regional_base_url: Optional[str] = None):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
-        :param username: The username to login to Frigidaire. Generally, this is an email
-        :param password: The password to login to Frigidaire
+        :param username: The username to log in to Frigidaire. Generally, this is an email
+        :param password: The password to log in to Frigidaire
         :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
                             authentication is required
         :param timeout: The amount of time in seconds to wait before timing out a request
@@ -249,7 +249,8 @@ class Frigidaire:
     def get_headers_frigidaire(self, method: str, include_bearer_token: bool) -> Dict[str, str]:
         to_return = {
             "x-api-key": FRIGIDAIRE_API_KEY,
-            "Authorization": "Bearer" if not (self.session_key and include_bearer_token) else f"Bearer {self.session_key}",
+            "Authorization": "Bearer" if not (
+                    self.session_key and include_bearer_token) else f"Bearer {self.session_key}",
             "Accept": "application/json",
             "Accept-Charset": "UTF-8",
             "User-Agent": FRIGIDAIRE_USER_AGENT
@@ -273,8 +274,8 @@ class Frigidaire:
         Tests for successful connectivity to the Frigidaire server
         :return:
         """
-        return self.get_request(self.regional_base_url, "/one-account-user/api/v1/users/current?countryDetails=true", self.get_headers_frigidaire("GET", include_bearer_token=True))
-
+        self.get_request(self.regional_base_url, "/one-account-user/api/v1/users/current?countryDetails=true",
+                         self.get_headers_frigidaire("GET", include_bearer_token=True))
 
     def authenticate(self) -> None:
         """
@@ -289,7 +290,7 @@ class Frigidaire:
         if not self.regional_base_url:
             self.session_key = None
 
-        ## Remember to include "Context-Brand: frigidaire" in the headers for the "/api/v1/identity-providers" and "/api/v1/users/current" calls
+        # Remember to include "Context-Brand: frigidaire" in the headers for the "/api/v1/identity-providers" and "/api/v1/users/current" calls
         if self.session_key:
             logging.debug('Authentication requested but session key is present, testing session key')
             try:
@@ -306,10 +307,13 @@ class Frigidaire:
             'clientSecret': CLIENT_SECRET,
             'scope': ''
         }
-        session_key_response = self.post_request(GLOBAL_API_URL, '/one-account-authorization/api/v1/token', self.get_headers_frigidaire("POST", include_bearer_token=False), data)
+        session_key_response = self.post_request(GLOBAL_API_URL, '/one-account-authorization/api/v1/token',
+                                                 self.get_headers_frigidaire("POST", include_bearer_token=False), data)
         self.session_key = session_key_response['accessToken']
 
-        identity_providers_response = self.get_request(GLOBAL_API_URL, f'/one-account-user/api/v1/identity-providers?brand=frigidaire&email={quote_plus(self.username)}&loginType=OTP', self.get_headers_frigidaire("GET", include_bearer_token=True))
+        identity_providers_response = self.get_request(GLOBAL_API_URL,
+                                                       f'/one-account-user/api/v1/identity-providers?brand=frigidaire&email={quote_plus(self.username)}&loginType=OTP',
+                                                       self.get_headers_frigidaire("GET", include_bearer_token=True))
         identity_domain = identity_providers_response[0]['domain']
         identity_api_key = identity_providers_response[0]['apiKey']
         self.regional_base_url = identity_providers_response[0]['httpRegionalBaseUrl']
@@ -322,7 +326,8 @@ class Frigidaire:
             "sdk": "Android_6.2.1",
             "targetEnv": "mobile"
         }
-        get_ids_response = self.post_request(f'https://socialize.{identity_domain}', '/socialize.getIDs', self.get_headers_auth("POST"), data, form_encoding=True)
+        get_ids_response = self.post_request(f'https://socialize.{identity_domain}', '/socialize.getIDs',
+                                             self.get_headers_auth("POST"), data, form_encoding=True)
 
         auth_gmid = get_ids_response['gmid']
         auth_ucid = get_ids_response['ucid']
@@ -339,7 +344,8 @@ class Frigidaire:
             "targetEnv": "mobile",
             "ucid": auth_ucid
         }
-        login_response = self.post_request(f'https://accounts.{identity_domain}', '/accounts.login', self.get_headers_auth("POST"), data, form_encoding=True)
+        login_response = self.post_request(f'https://accounts.{identity_domain}', '/accounts.login',
+                                           self.get_headers_auth("POST"), data, form_encoding=True)
 
         auth_session_token = login_response['sessionInfo']['sessionToken']
         auth_session_secret = login_response['sessionInfo']['sessionSecret']
@@ -357,8 +363,10 @@ class Frigidaire:
             "timestamp": str(int(time.time())),
             "ucid": auth_ucid
         }
-        data["sig"] = get_signature(auth_session_secret, "POST", f'https://accounts.{identity_domain}/accounts.getJWT', data)
-        jwt_response = self.post_request(f'https://accounts.{identity_domain}', '/accounts.getJWT', self.get_headers_auth("POST"), data, form_encoding=True)
+        data["sig"] = get_signature(auth_session_secret, "POST", f'https://accounts.{identity_domain}/accounts.getJWT',
+                                    data)
+        jwt_response = self.post_request(f'https://accounts.{identity_domain}', '/accounts.getJWT',
+                                         self.get_headers_auth("POST"), data, form_encoding=True)
 
         auth_jwt = jwt_response['id_token']
 
@@ -368,10 +376,13 @@ class Frigidaire:
             "idToken": auth_jwt,
             "scope": ""
         }
-        frigidaire_auth_response = self.post_request(self.regional_base_url, '/one-account-authorization/api/v1/token', self.get_headers_frigidaire("POST", include_bearer_token=False), data)
+        frigidaire_auth_response = self.post_request(self.regional_base_url, '/one-account-authorization/api/v1/token',
+                                                     self.get_headers_frigidaire("POST", include_bearer_token=False),
+                                                     data)
 
         if not frigidaire_auth_response.get('accessToken'):
-            raise FrigidaireException(f'Failed to authenticate, accessToken was not in response: {frigidaire_auth_response}')
+            raise FrigidaireException(
+                f'Failed to authenticate, accessToken was not in response: {frigidaire_auth_response}')
 
         logging.debug('Authentication successful, storing new session key')
         self.session_key = frigidaire_auth_response['accessToken']
@@ -408,8 +419,9 @@ class Frigidaire:
             to re-authenticate
             :return: The appliances that are associated with the Frigidaire account
             """
-            appliances = self.get_request(self.regional_base_url, 
-                '/appliance/api/v2/appliances?includeMetadata=true', self.get_headers_frigidaire("GET", include_bearer_token=True))
+            appliances = self.get_request(self.regional_base_url,
+                                          '/appliance/api/v2/appliances?includeMetadata=true',
+                                          self.get_headers_frigidaire("GET", include_bearer_token=True))
 
             return list(map(generate_appliance, appliances))
 
@@ -430,12 +442,14 @@ class Frigidaire:
         logging.debug(f'Getting appliance details for appliance {appliance.nickname}')
 
         try:
-            appliances = self.get_request(self.regional_base_url, 
-                '/appliance/api/v2/appliances?includeMetadata=true', self.get_headers_frigidaire("GET", include_bearer_token=True))
+            appliances = self.get_request(self.regional_base_url,
+                                          '/appliance/api/v2/appliances?includeMetadata=true',
+                                          self.get_headers_frigidaire("GET", include_bearer_token=True))
         except FrigidaireException:
             self.re_authenticate()
-            appliances = self.get_request(self.regional_base_url, 
-                '/appliance/api/v2/appliances?includeMetadata=true', self.get_headers_frigidaire("GET", include_bearer_token=True))
+            appliances = self.get_request(self.regional_base_url,
+                                          '/appliance/api/v2/appliances?includeMetadata=true',
+                                          self.get_headers_frigidaire("GET", include_bearer_token=True))
 
         for raw_appliance in appliances:
             if raw_appliance['applianceId'] == appliance.appliance_id:
@@ -457,14 +471,14 @@ class Frigidaire:
             }
 
             try:
-                self.put_request(self.regional_base_url, 
-                    f'/appliance/api/v2/appliances/{appliance.appliance_id}/command',
-                    self.get_headers_frigidaire("PUT", include_bearer_token=True), data)
+                self.put_request(self.regional_base_url,
+                                 f'/appliance/api/v2/appliances/{appliance.appliance_id}/command',
+                                 self.get_headers_frigidaire("PUT", include_bearer_token=True), data)
             except FrigidaireException:
                 self.re_authenticate()
-                self.put_request(self.regional_base_url, 
-                    f'/appliance/api/v2/appliances/{appliance.appliance_id}/command',
-                    self.get_headers_frigidaire("PUT", include_bearer_token=True), data)
+                self.put_request(self.regional_base_url,
+                                 f'/appliance/api/v2/appliances/{appliance.appliance_id}/command',
+                                 self.get_headers_frigidaire("PUT", include_bearer_token=True), data)
 
     @staticmethod
     def parse_response(response: Response) -> Dict:
@@ -503,7 +517,7 @@ class Frigidaire:
     def get_request(self, url: str, path: str, headers: Dict[str, str]) -> Union[Dict, List]:
         """
         Makes a get request to the Frigidaire API and parses the result
-        :parm url: Base URL for the request (no slashes)
+        :param url: Base URL for the request (no slashes)
         :param path: The path to the resource, including query params
         :param headers: Headers to include in the request
         :return: The contents of 'data' in the resulting json
@@ -514,11 +528,12 @@ class Frigidaire:
         except Exception as e:
             self.handle_request_exception(e, "GET", f'{url}{path}', headers, "")
 
-    def post_request(self, url: str, path: str, headers: Dict[str, str], data: Dict, form_encoding: bool=False) -> Union[Dict, List]:
+    def post_request(self, url: str, path: str, headers: Dict[str, str], data: Dict, form_encoding: bool = False) -> Union[Dict, List]:
         """
         Makes a post request to the Frigidaire API and parses the result
-        :parm url: Base URL for the request (no slashes)
+        :param url: Base URL for the request (no slashes)
         :param path: The path to the resource, including query params
+        :param headers: Headers to include in the request
         :param data: The data to include in the body of the request
         :param form_encoding: Whether to form-encode data. If false, encodes as json
         :return: The contents of 'data' in the resulting json
@@ -526,22 +541,24 @@ class Frigidaire:
         try:
             encoded_data = urlencode(data) if form_encoding else json.dumps(data)
             response = requests.post(f'{url}{path}', data=encoded_data,
-                    headers=headers, verify=False, timeout=self.timeout)
+                                     headers=headers, verify=False, timeout=self.timeout)
             return self.parse_response(response)
         except Exception as e:
-            self.handle_request_exception(e, "POST", f'{url}{path}', headers, encoded_data)
+            self.handle_request_exception(e, "POST", f'{url}{path}', headers, json.dumps(data))
 
-    def put_request(self, url: str, path: str, headers: Dict[str, str], data: Dict):
+    def put_request(self, url: str, path: str, headers: Dict[str, str], data: Dict) -> Union[Dict, List]:
         """
         Makes a put request to the Frigidaire API and parses the result
-        :parm url: Base URL for the request (no slashes)
+        :param url: Base URL for the request (no slashes)
+        :param headers: Headers to include in the request
         :param path: The path to the resource, including query params
         :param data: The data to include in the body of the request
         :return: The contents of 'data' in the resulting json
         """
+        encoded_data = json.dumps(data)
         try:
-            encoded_data = json.dumps(data)
             response = requests.put(f'{url}{path}', data=encoded_data,
-                    headers=headers, verify=False, timeout=self.timeout)
+                                    headers=headers, verify=False, timeout=self.timeout)
+            return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "PUT", f'{url}{path}', headers, encoded_data)
