@@ -1,7 +1,7 @@
 import configparser
 import logging
 
-from frigidaire import Action, Power, Mode, FanSpeed, Frigidaire, HaclCode, Component
+from frigidaire import Action, Power, Mode, FanSpeed, Frigidaire
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
