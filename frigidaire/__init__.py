@@ -259,7 +259,8 @@ class Frigidaire:
             to_return["Content-Type"] = "application/json"
         return to_return
 
-    def get_headers_auth(self, method: str) -> Dict[str, str]:
+    @staticmethod
+    def get_headers_auth(method: str) -> Dict[str, str]:
         to_return = {
             "User-Agent": AUTH_USER_AGENT,
             "Accept-Encoding": "gzip",
@@ -507,7 +508,8 @@ class Frigidaire:
 
         return response_dict
 
-    def handle_request_exception(self, e: Exception, method: str, fullpath: str, headers: Dict[str, str], payload: str):
+    @staticmethod
+    def handle_request_exception(e: Exception, method: str, fullpath: str, headers: Dict[str, str], payload: str):
         logging.warning(e)
         error_str = f'Error processing request:\n{method} {fullpath}\nheaders={headers}\npayload={payload}\n'
         'This may be safely ignored when used to test for a good connection in the authentication flow'
