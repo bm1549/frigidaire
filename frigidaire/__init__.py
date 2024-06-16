@@ -102,8 +102,8 @@ class Detail(str, Enum):
 
 class Appliance:
     def __init__(self, args: Dict):
-        self.appliance_type: str = args['properties']['reported']['applianceInfo']['applianceType']
         self.appliance_id: str = args['applianceId']
+        self.appliance_type: str = args['applianceData']['modelName']
         self.nickname: str = args['applianceData']['applianceName']
         self.destination = Destination(self.appliance_type)
 
