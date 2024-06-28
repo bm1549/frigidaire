@@ -3,21 +3,29 @@ from enum import Enum
 from requests import Response
 from typing import Optional, Dict, Union, List
 
+import gzip
 import json
 import logging
+import random
 import requests
 import urllib3
-import uuid
+from urllib.parse import quote_plus
+from urllib.parse import urlencode
 import time
+
+from .signature_generator import get_signature
 
 # Frigidaire uses a self-signed certificate, which forces us to disable SSL verification
 # To keep our logs free of spam, we disable warnings on insecure requests
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_URL = 'https://api.us.ecp.electrolux.com'
+GLOBAL_API_URL = 'https://api.ocp.electrolux.one'
 
-CLIENT_ID = 'Gsdwexj38r1sXSXIPVdxj4DGoU5ZoaI6aW6ZckBI'
-USER_AGENT = 'Frigidaire/81 CFNetwork/1206 Darwin/20.1.0'
+FRIGIDAIRE_API_KEY = 'UcGF9pmUMKUqBL6qcQvTu4K4WBmQ5KJqJXprCTdc'
+CLIENT_SECRET = '26SGRupOJaxv4Y1npjBsScjJPuj7f8YTdGxJak3nhAnowCStsBAEzKtrEHsgbqUyh90KFsoty7xXwMNuLYiSEcLqhGQryBM26i435hncaLqj5AuSvWaGNRTACi7ba5yu'
+CLIENT_ID = 'FrigidaireOneApp'
+FRIGIDAIRE_USER_AGENT = 'Ktor client'
+AUTH_USER_AGENT = 'Dalvik/2.1.0 (Linux; U; Android 12; sdk_gphone64_x86_64 Build/SE1A.220826.008)'
 
 
 class FrigidaireException(Exception):
@@ -25,187 +33,172 @@ class FrigidaireException(Exception):
 
 
 class Destination(str, Enum):
-    AIR_CONDITIONER = "AC1"
-    DEHUMIDIFIER = "DH1"
+    AIR_CONDITIONER = "AC"
+    DEHUMIDIFIER = "DH"
 
 
-class HaclCode(str, Enum):
-    CONNECTIVITY_STATE = "0000"
-    APPLIANCE_SERIAL_NUMBER = "0002"
-    CONNECTIVITY_NODE_SW_VERSION = "0011"
-    LINK_QUALITY_INDICATOR = "0032"
-    NETWORK_NAME = "0070"
-    APPLIANCE_STATE = "0401"
-    POWER_MODE = "0403"
-    TEMPERATURE_REPRESENTATION = "0420"
-    SLEEP_MODE = "0428"
-    AMBIENT_TEMPERATURE = "0430"
-    TARGET_TEMPERATURE = "0432"
-    ALERT_EVENT = "0470"
-    COMPRESSOR_STATE = "04A1"
-    BIN_FULL_ALERT = "04E5"
-    TARGET_HUMIDITY = "04EA"
-    AMBIENT_HUMIDITY = "04EB"
-    AC_MODE = "1000"
-    AC_FAN_SPEED_SETTING = "1002"
-    AC_FAN_SPEED_STATE = "1003"
-    AC_CLEAN_AIR_MODE = "1004"
-    AC_CLEAN_FILTER_ALERT = "1021"
-    AC_COMPRESSOR_COOLING_TIME = "1030"
-    AC_COMPRESSOR_HEATING_RUNTIME = "1031"
-    AC_ELECTRIC_HEATER_RUNTIME = "1032"
-    AC_SCHEDULER_MODE = "1050"
-    AC_SCHEDULER_EVENT_COUNT = "1052"
-    AC_SCHEDULER_EVENT_SUNDAY = "1053"
-    AC_SCHEDULER_EVENT_MONDAY = "1054"
-    AC_SCHEDULER_EVENT_TUESDAY = "1055"
-    AC_SCHEDULER_EVENT_WEDNESDAY = "1056"
-    AC_SCHEDULER_EVENT_THURSDAY = "1057"
-    AC_SCHEDULER_EVENT_FRIDAY = "1058"
-    AC_SCHEDULER_EVENT_SATURDAY = "1059"
-    AC_SCHEDULER_EVENT_ONE_TIME = "105A"
+class Setting(str, Enum):
+    """
+    Writeable settings that are known valid names of Components.
+    These can be passed to the execute_action() API together with a target value
+    to change settings.
+    """
+
+    # Common
+    FAN_SPEED = "fanSpeedSetting"
+    EXECUTE_COMMAND = "executeCommand"
+    MODE = "mode"
+    SLEEP_MODE = "sleepMode"
+    UI_LOCK_MODE = "uiLockMode"
+    VERTICAL_SWING = "verticalSwing"
+
+    # AC
+    TARGET_TEMPERATURE_C = "targetTemperatureC"
+    TARGET_TEMPERATURE_F = "targetTemperatureF"
+    TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
+
+    # Humidifier
+    CLEAN_AIR_MODE = "cleanAirMode"
+    DISPLAY_LIGHT = "displayLight"
+    START_TIME = "startTime"
+    STOP_TIME = "stopTime"
+    TARGET_HUMIDITY = "targetHumidity"
 
 
-class ContainerId(str, Enum):
-    COEFFICIENT = "1"
-    EXPONENT = "3"
-    UNIT = "0"
+class Detail(str, Enum):
+    """
+    Readable details that are known to be present in some products.
+    """
 
-    # This isn't the 'real' name, but it makes way more sense
-    TEMPERATURE = COEFFICIENT
+    # Common
+    ALERTS = "alerts"
+    APPLIANCE_STATE = "applianceState"
+    APPLIANCE_UI_SW_VERSION = "applianceUiSwVersion"
+    FAN_SPEED = "fanSpeedSetting"
+    FAN_SPEED_STATE = "fanSpeedState"
+    FILTER_STATE = "filterState"
+    MODE = "mode"
+    NETWORK_INTERFACE = "networkInterface"
+    UI_LOCK_MODE = "uiLockMode"
+    SLEEP_MODE = "sleepMode"
+    VERTICAL_SWING = "verticalSwing"
 
+    # AC
+    AMBIENT_TEMPERATURE_C = "ambientTemperatureC"
+    AMBIENT_TEMPERATURE_F = "ambientTemperatureF"
+    TARGET_TEMPERATURE_C = "targetTemperatureC"
+    TARGET_TEMPERATURE_F = "targetTemperatureF"
+    TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
 
-class ApplianceDetailContainer:
-    def __init__(self, args: Dict):
-        self.property_name: str = args['propertyName']
-        self.t_id: str = args['tId']
-        self.group: int = args['group']
-        self.number_value: int = args['numberValue']
-        self.translation: str = args['translation']
-
-
-class ApplianceDetailContainers:
-    def __init__(self, application_detail_containers: List[ApplianceDetailContainer]):
-        self.application_detail_containers: Dict = {container.t_id: container for container in
-                                                    application_detail_containers}
-
-    def for_id(self, container_id: ContainerId):
-        return self.application_detail_containers.get(container_id)
-
-
-class ApplianceDetail:
-    def __init__(self, args: Dict):
-        self.string_value: Optional[str] = args.get('stringValue')
-        self.number_value: Optional[int] = args.get('numberValue')
-        self.spk_timestamp: int = args['spkTimestamp']
-        self.description: str = args['description']
-        self.hacl_code: str = args['haclCode']
-        self.source: str = args['source']
-        self.containers: ApplianceDetailContainers = ApplianceDetailContainers(
-            list(map(ApplianceDetailContainer, args['containers'])))
-
-    def __eq__(self, other):
-        if isinstance(other, int):
-            return self.number_value == other
-        elif isinstance(other, str):
-            return self.string_value == other
-        return super().__eq__(other)
-
-
-class ApplianceDetails:
-    def __init__(self, appliance_details: List[ApplianceDetail]):
-        self.appliance_details: Dict = {detail.hacl_code: detail for detail in appliance_details}
-
-    def for_code(self, hacl_code: HaclCode) -> Optional[ApplianceDetail]:
-        return self.appliance_details.get(hacl_code)
+    # Humidifier
+    DISPLAY_LIGHT = "displayLight"
+    CLEAN_AIR_MODE = "cleanAirMode"
+    SENSOR_HUMIDITY = "sensorHumidity"
+    START_TIME = "startTime"
+    STOP_TIME = "stopTime"
+    TARGET_HUMIDITY = "targetHumidity"
+    WATER_BUCKET_LEVEL = "waterBucketLevel"
 
 
 class Appliance:
     def __init__(self, args: Dict):
-        self.appliance_type: str = args['appliance_type']
-        self.appliance_id: str = args['appliance_id']
-        self.pnc: str = args['pnc']
-        self.elc: str = args['elc']
-        self.sn: str = args['sn']
-        self.mac: str = args['mac']
-        self.cpv: str = args['cpv']
-        self.nickname: str = args['nickname']
-        # Assume a device is an AC until overridden
-        self.destination = Destination.AIR_CONDITIONER
-
-    @property
-    def query_string(self) -> str:
-        params = [
-            f'elc={self.elc}',
-            f'sn={self.sn}',
-            f'pnc={self.pnc}',
-            f'mac={self.mac}',  # This isn't necessary for appliance details, but it is for executing an action
-        ]
-
-        return '&'.join(params)
+        self.appliance_id: str = args['applianceId']
+        self.appliance_type: str = args['applianceData']['modelName']
+        self.nickname: str = args['applianceData']['applianceName']
+        self.destination = Destination(self.appliance_type)
 
 
-class Component(dict):
-    def __init__(self, name: str, value: Union[int, str]):
-        dict.__init__(self, name=name, value=value)
+class Component:
+    def __init__(self, name: Union[str, Setting], value: Union[int, str]):
+        """
+        Create a new Component to specify a setting with a name and value.
+        Note: String names are discouraged but allowed since not all settings are known at this time.
+
+        :param name: Name of the setting (Setting or a string).
+        :param value: Value of the setting (string or int)
+        """
+        if isinstance(name, Setting):
+            name = name.value
+        self.name = name
+        self.value = value
 
 
 class Unit(str, Enum):
-    FAHRENHEIT = "Fahrenheit"
-    CELSIUS = "Celsius"
+    FAHRENHEIT = "FAHRENHEIT"
+    CELSIUS = "CELSIUS"
 
 
-class Power(int, Enum):
-    ON = 1
-    OFF = 0
+class ApplianceState(str, Enum):
+    OFF = "OFF"
+    RUNNING = "RUNNING"
 
 
-class Mode(int, Enum):
+class FilterState(str, Enum):
+    BUY = "BUY"
+    CHANGE = "CHANGE"
+    CLEAN = "CLEAN"
+    GOOD = "GOOD"
+
+
+class Power(str, Enum):
+    ON = 'ON'
+    OFF = 'OFF'
+
+
+class Alert(str, Enum):
+    BUCKET_FULL = "BUCKET_FULL"
+    BUS_HIGH_VOLTAGE = "BUS_HIGH_VOLTAGE"
+    COMMUNICATION_FAULT = "COMMUNICATION_FAULT"
+    DC_MOTOR_FAULT = "DC_MOTOR_FAULT"
+    DC_MOTOR_LOST_SPEED = "DC_MOTOR_LOST_SPEED"
+    DRAIN_PAN_FULL = "DRAIN_PAN_FULL"
+    INDOOR_DEFROST_THERMISTOR_FAULT = "INDOOR_DEFROST_THERMISTOR_FAULT"
+    PM25_SENSOR_FAULT = "PM25_SENSOR_FAULT"
+    TUBE_HIGH_TEMPERATURE = "TUBE_HIGH_TEMPERATURE"
+    UNKNOWN_STATE_ERROR = "UNKNOWN_STATE_ERROR"
+
+
+class Mode(str, Enum):
     # Air Conditioner
-    OFF = 0
-    COOL = 1
-    FAN = 3
-    ECO = 4
+    OFF = 'OFF'
+    COOL = 'COOL'
+    FAN = 'FANONLY'
+    ECO = 'ECO'
     # Dehumidifier
-    DRY = 5
-    AUTO = 6
-    CONTINUOUS = 8
-    QUIET = 9
+    DRY = 'DRY'
+    AUTO = 'AUTO'
+    CONTINUOUS = 'CONTINUOUS'
+    QUIET = 'QUIET'
 
 
-class FanSpeed(int, Enum):
-    # Only HIGH and LOW apply to dehumidifiers
-    OFF = 0
-    LOW = 1
-    MEDIUM = 2
-    HIGH = 4
-    AUTO = 7
-
-
-class ConnectivityState(str, Enum):
-    CONNECTED = 'connect'
-    DISCONNECTED = 'disconnect'
+class FanSpeed(str, Enum):
+    # Common
+    LOW = 'LOW'
+    MEDIUM = 'MIDDLE'
+    HIGH = 'HIGH'
+    # Air Conditioner
+    AUTO = 'AUTO'
 
 
 class Action:
     @classmethod
     def set_power(cls, power: Power) -> List[Component]:
-        return [Component(HaclCode.POWER_MODE, power)]
+        return [Component(Setting.EXECUTE_COMMAND, power)]
 
     @classmethod
     def set_mode(cls, mode: Mode) -> List[Component]:
-        return [Component(HaclCode.AC_MODE, mode)]
+        return [Component(Setting.MODE, mode)]
 
     @classmethod
     def set_fan_speed(cls, fan_speed: FanSpeed) -> List[Component]:
-        return [Component(HaclCode.AC_FAN_SPEED_SETTING, fan_speed)]
+        return [Component(Setting.FAN_SPEED, fan_speed)]
 
     @classmethod
     def set_humidity(cls, humidity: int) -> List[Component]:
         if humidity < 35 or humidity > 85:
             raise FrigidaireException("Humidity must be between 35 and 85 percent, inclusive")
 
-        return [Component(HaclCode.TARGET_HUMIDITY, humidity)]
+        return [Component(Setting.TARGET_HUMIDITY, humidity)]
 
     @classmethod
     def set_temperature(cls, temperature: int) -> List[Component]:
@@ -219,12 +212,16 @@ class Action:
                 raise FrigidaireException("Temperature must be between 16 and 32 degrees, inclusive")
 
         return [
-            Component(HaclCode.TARGET_TEMPERATURE, "Container"),
-            Component(ContainerId.COEFFICIENT, temperature),
-            # This is the actual temperature, the rest is some required nonsense
-            Component(ContainerId.EXPONENT, 0),
-            Component(ContainerId.UNIT, 1),
+            Component(Setting.TEMPERATURE_REPRESENTATION, Unit.FAHRENHEIT),
+            Component(Setting.TARGET_TEMPERATURE_F, temperature),
         ]
+
+
+def _generate_nonce() -> str:
+    """
+    Generate a one-off random token to preserve the security of encrypted communication
+    """
+    return f'{str(int(time.time()))}_-{str(random.getrandbits(32))}'
 
 
 class Frigidaire:
@@ -233,29 +230,58 @@ class Frigidaire:
     This was reverse-engineered from the Frigidaire 2.0 App
     """
 
-    def __init__(self, username: str, password: str, session_key: Optional[str] = None, timeout: Optional[float] = None):
+    def __init__(self, username: str, password: str, session_key: Optional[str] = None, timeout: Optional[float] = None,
+                 regional_base_url: Optional[str] = None):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
-        :param username: The username to login to Frigidaire. Generally, this is an email
-        :param password: The password to login to Frigidaire
+        :param username: The username to log in to Frigidaire. Generally, this is an email
+        :param password: The password to log in to Frigidaire
         :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
                             authentication is required
         :param timeout: The amount of time in seconds to wait before timing out a request
+        :param regional_base_url: Regional base URL for the API user account
+                            (e.g., https://api.us.ocp.electrolux.one for U.S. accounts). If not specified,
+                            authentication is required
         """
         self.username = username
         self.password = password
-        self.device_id: str = str(uuid.uuid4())
         self.session_key: Optional[str] = session_key
         self.timeout: Optional[float] = timeout
+        self.regional_base_url = regional_base_url
 
         self.authenticate()
+
+    def get_headers_frigidaire(self, method: str, include_bearer_token: bool) -> Dict[str, str]:
+        to_return = {
+            "x-api-key": FRIGIDAIRE_API_KEY,
+            "Authorization": "Bearer" if not (
+                    self.session_key and include_bearer_token) else f"Bearer {self.session_key}",
+            "Accept": "application/json",
+            "Accept-Charset": "UTF-8",
+            "User-Agent": FRIGIDAIRE_USER_AGENT
+        }
+        if method.upper() != "GET":
+            to_return["Content-Type"] = "application/json"
+        return to_return
+
+    @staticmethod
+    def get_headers_auth(method: str) -> Dict[str, str]:
+        to_return = {
+            "User-Agent": AUTH_USER_AGENT,
+            "Accept-Encoding": "gzip",
+            "connection": "close"
+        }
+        if method.upper() != "GET":
+            to_return["Content-Type"] = "application/x-www-form-urlencoded"
+        return to_return
 
     def test_connection(self) -> None:
         """
         Tests for successful connectivity to the Frigidaire server
         :return:
         """
-        self.get_request("/config-files/haclmap/latest_version")
+        self.get_request(self.regional_base_url, "/one-account-user/api/v1/users/current?countryDetails=true",
+                         self.get_headers_frigidaire("GET", include_bearer_token=True))
 
     def authenticate(self) -> None:
         """
@@ -266,6 +292,11 @@ class Frigidaire:
         Will throw an exception if the authentication request fails or returns an unexpected response
         :return:
         """
+
+        if not self.regional_base_url:
+            self.session_key = None
+
+        # Remember to include "Context-Brand: frigidaire" in the headers for the "/api/v1/identity-providers" and "/api/v1/users/current" calls
         if self.session_key:
             logging.debug('Authentication requested but session key is present, testing session key')
             try:
@@ -277,21 +308,90 @@ class Frigidaire:
                 self.session_key = None
 
         data = {
-            'username': self.username,
-            'password': self.password,
-            'deviceId': self.device_id,
-            'brand': 'Frigidaire',
-            'country': 'US',
+            'grantType': 'client_credentials',
+            'clientId': CLIENT_ID,
+            'clientSecret': CLIENT_SECRET,
+            'scope': ''
         }
+        session_key_response = self.post_request(GLOBAL_API_URL, '/one-account-authorization/api/v1/token',
+                                                 self.get_headers_frigidaire("POST", include_bearer_token=False), data)
+        self.session_key = session_key_response['accessToken']
 
-        auth_response = self.post_request('/authentication/authenticate', data)
+        identity_providers_response = self.get_request(GLOBAL_API_URL,
+                                                       f'/one-account-user/api/v1/identity-providers?brand=frigidaire&email={quote_plus(self.username)}&loginType=OTP',
+                                                       self.get_headers_frigidaire("GET", include_bearer_token=True))
+        identity_domain = identity_providers_response[0]['domain']
+        identity_api_key = identity_providers_response[0]['apiKey']
+        self.regional_base_url = identity_providers_response[0]['httpRegionalBaseUrl']
 
-        if not auth_response.get('sessionKey'):
-            raise FrigidaireException(f'Failed to authenticate, sessionKey was not in response: {auth_response}')
+        data = {
+            "apiKey": identity_api_key,
+            "format": "json",
+            "httpStatusCodes": "false",
+            "nonce": _generate_nonce(),
+            "sdk": "Android_6.2.1",
+            "targetEnv": "mobile"
+        }
+        get_ids_response = self.post_request(f'https://socialize.{identity_domain}', '/socialize.getIDs',
+                                             self.get_headers_auth("POST"), data, form_encoding=True)
+
+        auth_gmid = get_ids_response['gmid']
+        auth_ucid = get_ids_response['ucid']
+
+        data = {
+            "apiKey": identity_api_key,
+            "format": "json",
+            "gmid": auth_gmid,
+            "httpStatusCodes": "false",
+            "loginID": self.username,
+            "nonce": _generate_nonce(),
+            "password": self.password,
+            "sdk": "Android_6.2.1",
+            "targetEnv": "mobile",
+            "ucid": auth_ucid
+        }
+        login_response = self.post_request(f'https://accounts.{identity_domain}', '/accounts.login',
+                                           self.get_headers_auth("POST"), data, form_encoding=True)
+
+        auth_session_token = login_response['sessionInfo']['sessionToken']
+        auth_session_secret = login_response['sessionInfo']['sessionSecret']
+
+        data = {
+            "apiKey": identity_api_key,
+            "fields": "country",
+            "format": "json",
+            "gmid": auth_gmid,
+            "httpStatusCodes": "false",
+            "nonce": _generate_nonce(),
+            "oauth_token": auth_session_token,
+            "sdk": "Android_6.2.1",
+            "targetEnv": "mobile",
+            "timestamp": str(int(time.time())),
+            "ucid": auth_ucid
+        }
+        data["sig"] = get_signature(auth_session_secret, "POST", f'https://accounts.{identity_domain}/accounts.getJWT',
+                                    data)
+        jwt_response = self.post_request(f'https://accounts.{identity_domain}', '/accounts.getJWT',
+                                         self.get_headers_auth("POST"), data, form_encoding=True)
+
+        auth_jwt = jwt_response['id_token']
+
+        data = {
+            "grantType": "urn:ietf:params:oauth:grant-type:token-exchange",
+            "clientId": CLIENT_ID,
+            "idToken": auth_jwt,
+            "scope": ""
+        }
+        frigidaire_auth_response = self.post_request(self.regional_base_url, '/one-account-authorization/api/v1/token',
+                                                     self.get_headers_frigidaire("POST", include_bearer_token=False),
+                                                     data)
+
+        if not frigidaire_auth_response.get('accessToken'):
+            raise FrigidaireException(
+                f'Failed to authenticate, accessToken was not in response: {frigidaire_auth_response}')
 
         logging.debug('Authentication successful, storing new session key')
-
-        self.session_key: Optional[str] = auth_response['sessionKey']
+        self.session_key = frigidaire_auth_response['accessToken']
 
     def re_authenticate(self) -> None:
         """
@@ -317,10 +417,7 @@ class Frigidaire:
             :param raw_appliance: The raw output of the Frigidaire API for the appliance
             :return: The appliance augmented with a destination
             """
-            appliance = Appliance(raw_appliance)
-            appliance_details = self.get_appliance_details(appliance)
-            appliance.destination = appliance_details.for_code(HaclCode.AC_MODE).source
-            return appliance
+            return Appliance(raw_appliance)
 
         def get_appliances_inner():
             """
@@ -328,9 +425,9 @@ class Frigidaire:
             to re-authenticate
             :return: The appliances that are associated with the Frigidaire account
             """
-            appliances = self.get_request(
-                f'/user-appliance-reg/users/{self.username}/appliances?country=US&includeFields=true'
-            )
+            appliances = self.get_request(self.regional_base_url,
+                                          '/appliance/api/v2/appliances?includeMetadata=true',
+                                          self.get_headers_frigidaire("GET", include_bearer_token=True))
 
             return list(map(generate_appliance, appliances))
 
@@ -341,7 +438,7 @@ class Frigidaire:
             self.re_authenticate()
             return get_appliances_inner()
 
-    def get_appliance_details(self, appliance: Appliance) -> ApplianceDetails:
+    def get_appliance_details(self, appliance: Appliance) -> Dict:
         """
         Uses the Frigidaire API to fetch details for a given appliance
         Will authenticate if the request fails
@@ -351,12 +448,19 @@ class Frigidaire:
         logging.debug(f'Getting appliance details for appliance {appliance.nickname}')
 
         try:
-            details = self.get_request(f'/elux-ms/appliances/latest?{appliance.query_string}&includeSubcomponents=true')
-            return ApplianceDetails(list(map(ApplianceDetail, details)))
+            appliances = self.get_request(self.regional_base_url,
+                                          '/appliance/api/v2/appliances?includeMetadata=true',
+                                          self.get_headers_frigidaire("GET", include_bearer_token=True))
         except FrigidaireException:
             self.re_authenticate()
-            details = self.get_request(f'/elux-ms/appliances/latest?{appliance.query_string}&includeSubcomponents=true')
-            return ApplianceDetails(list(map(ApplianceDetail, details)))
+            appliances = self.get_request(self.regional_base_url,
+                                          '/appliance/api/v2/appliances?includeMetadata=true',
+                                          self.get_headers_frigidaire("GET", include_bearer_token=True))
+
+        for raw_appliance in appliances:
+            if raw_appliance['applianceId'] == appliance.appliance_id:
+                return raw_appliance['properties']['reported']
+        raise FrigidaireException(f"Appliance {appliance.nickname} not found in list of appliances")
 
     def execute_action(self, appliance: Appliance, action: List[Component]) -> None:
         """
@@ -366,37 +470,21 @@ class Frigidaire:
         :param action: The action to be performed
         :return:
         """
-        data = {
-            'components': action,
-            'timestamp': str(int(time.time())),
-            'operationMode': 'EXE',
-            'version': 'ad',
-            'source': 'RP1',
-            'destination': appliance.destination,
-        }
 
-        try:
-            self.post_request(f'/commander/remote/sendjson?{appliance.query_string}', data)
-        except FrigidaireException:
-            self.re_authenticate()
-            self.post_request(f'/commander/remote/sendjson?{appliance.query_string}', data)
+        for component in action:
+            data = {
+                component.name: component.value
+            }
 
-    @property
-    def headers(self):
-        """
-        Generates the headers that should be sent on every request to the Frigidaire API
-        :return:
-        """
-        return {
-            'session_token': self.session_key,
-            'x-ibm-client-id': CLIENT_ID,
-            'x-api-key': CLIENT_ID,
-            'user-agent': USER_AGENT,
-            'content-type': 'application/json',
-            'accept': '*/*',
-            'accept-language': 'en-us',
-            'authorization': 'Basic ' + CLIENT_ID,
-        }
+            try:
+                self.put_request(self.regional_base_url,
+                                 f'/appliance/api/v2/appliances/{appliance.appliance_id}/command',
+                                 self.get_headers_frigidaire("PUT", include_bearer_token=True), data)
+            except FrigidaireException:
+                self.re_authenticate()
+                self.put_request(self.regional_base_url,
+                                 f'/appliance/api/v2/appliances/{appliance.appliance_id}/command',
+                                 self.get_headers_frigidaire("PUT", include_bearer_token=True), data)
 
     @staticmethod
     def parse_response(response: Response) -> Dict:
@@ -408,28 +496,76 @@ class Frigidaire:
         if response.status_code != 200:
             raise FrigidaireException(f'Request failed with status {response.status_code}: {response.content}')
 
-        response_dict = response.json()
+        try:
+            if response.headers.get('Content-Encoding') == 'gzip':
+                # Hack: Sometimes the server indicates "Content-Encoding: gzip" but does not send gzipped data
+                try:
+                    data = gzip.decompress(response.content)
+                    response_dict = json.loads(data.decode("utf-8"))
+                except gzip.BadGzipFile:
+                    logging.debug("Bad gzipped payload-- attempting to parse as plaintext")
+                    response_dict = response.json()
+            else:
+                response_dict = response.json()
+        except Exception as e:
+            logging.error(e)
+            raise FrigidaireException(f'Received an unexpected response:\n{response.content}')
 
-        if response_dict.get('status') != 'OK' or 'data' not in response_dict:
-            raise FrigidaireException(f'Unexpected response from API: {response.content}')
+        return response_dict
 
-        return response_dict['data']
+    @staticmethod
+    def handle_request_exception(e: Exception, method: str, fullpath: str, headers: Dict[str, str], payload: str):
+        logging.warning(e)
+        error_str = f'Error processing request:\n{method} {fullpath}\nheaders={headers}\npayload={payload}\n'
+        'This may be safely ignored when used to test for a good connection in the authentication flow'
+        logging.warning(error_str)
+        raise FrigidaireException(error_str)
 
-    def get_request(self, path: str) -> Union[Dict, List]:
+    def get_request(self, url: str, path: str, headers: Dict[str, str]) -> Union[Dict, List]:
         """
         Makes a get request to the Frigidaire API and parses the result
+        :param url: Base URL for the request (no slashes)
         :param path: The path to the resource, including query params
+        :param headers: Headers to include in the request
         :return: The contents of 'data' in the resulting json
         """
-        response = requests.get(f'{API_URL}{path}', headers=self.headers, verify=False, timeout=self.timeout)
-        return self.parse_response(response)
+        try:
+            response = requests.get(f'{url}{path}', headers=headers, verify=False, timeout=self.timeout)
+            return self.parse_response(response)
+        except Exception as e:
+            self.handle_request_exception(e, "GET", f'{url}{path}', headers, "")
 
-    def post_request(self, path: str, data: Dict) -> Union[Dict, List]:
+    def post_request(self, url: str, path: str, headers: Dict[str, str], data: Dict, form_encoding: bool = False) -> Union[Dict, List]:
         """
         Makes a post request to the Frigidaire API and parses the result
+        :param url: Base URL for the request (no slashes)
+        :param path: The path to the resource, including query params
+        :param headers: Headers to include in the request
+        :param data: The data to include in the body of the request
+        :param form_encoding: Whether to form-encode data. If false, encodes as json
+        :return: The contents of 'data' in the resulting json
+        """
+        try:
+            encoded_data = urlencode(data) if form_encoding else json.dumps(data)
+            response = requests.post(f'{url}{path}', data=encoded_data,
+                                     headers=headers, verify=False, timeout=self.timeout)
+            return self.parse_response(response)
+        except Exception as e:
+            self.handle_request_exception(e, "POST", f'{url}{path}', headers, json.dumps(data))
+
+    def put_request(self, url: str, path: str, headers: Dict[str, str], data: Dict) -> Union[Dict, List]:
+        """
+        Makes a put request to the Frigidaire API and parses the result
+        :param url: Base URL for the request (no slashes)
+        :param headers: Headers to include in the request
         :param path: The path to the resource, including query params
         :param data: The data to include in the body of the request
         :return: The contents of 'data' in the resulting json
         """
-        response = requests.post(f'{API_URL}{path}', data=json.dumps(data), headers=self.headers, verify=False, timeout=self.timeout)
-        return self.parse_response(response)
+        encoded_data = json.dumps(data)
+        try:
+            response = requests.put(f'{url}{path}', data=encoded_data,
+                                    headers=headers, verify=False, timeout=self.timeout)
+            return self.parse_response(response)
+        except Exception as e:
+            self.handle_request_exception(e, "PUT", f'{url}{path}', headers, encoded_data)
