@@ -202,15 +202,10 @@ class Action:
 
     @classmethod
     def set_temperature(cls, temperature: int) -> List[Component]:
-        # These are restrictions set by Frigidaire
-        if ContainerId.UNIT == 0:
-            if temperature < 60 or temperature > 90:
-                raise FrigidaireException("Temperature must be between 60 and 90 degrees, inclusive")
-        
-        if ContainerId.UNIT == 1:
-            if temperature < 16 or temperature > 32:
-                raise FrigidaireException("Temperature must be between 16 and 32 degrees, inclusive")
-
+        # Note: Frigidaire sets limits for temperature which could cause this action to fail
+        # Temperature ranges are below, inclusive of the endpoints
+        #   Fahrenheit: 60-90
+        #   Celsius: 16-32
         return [
             Component(Setting.TEMPERATURE_REPRESENTATION, Unit.FAHRENHEIT),
             Component(Setting.TARGET_TEMPERATURE_F, temperature),
