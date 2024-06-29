@@ -1,4 +1,5 @@
 """Frigidaire 2.0 API client"""
+import traceback
 from enum import Enum
 from requests import Response
 from typing import Optional, Dict, Union, List
@@ -428,7 +429,12 @@ class Frigidaire:
 
         try:
             return get_appliances_inner()
-        except FrigidaireException:
+        except FrigidaireException as e:
+            # Re-authenticating on a 429 makes things worse
+            if "cas_3403" in traceback.format_exc():
+                logging.debug("Rate limited - try again later")
+                raise e
+
             logging.debug('Listing appliances failed - attempting to re-authenticate')
             self.re_authenticate()
             return get_appliances_inner()
@@ -446,7 +452,12 @@ class Frigidaire:
             appliances = self.get_request(self.regional_base_url,
                                           '/appliance/api/v2/appliances?includeMetadata=true',
                                           self.get_headers_frigidaire("GET", include_bearer_token=True))
-        except FrigidaireException:
+        except FrigidaireException as e:
+            # Re-authenticating on a 429 makes things worse
+            if "cas_3403" in traceback.format_exc():
+                logging.debug("Rate limited - try again later")
+                raise e
+
             self.re_authenticate()
             appliances = self.get_request(self.regional_base_url,
                                           '/appliance/api/v2/appliances?includeMetadata=true',
@@ -475,7 +486,12 @@ class Frigidaire:
                 self.put_request(self.regional_base_url,
                                  f'/appliance/api/v2/appliances/{appliance.appliance_id}/command',
                                  self.get_headers_frigidaire("PUT", include_bearer_token=True), data)
-            except FrigidaireException:
+            except FrigidaireException as e:
+                # Re-authenticating on a 429 makes things worse
+                if "cas_3403" in traceback.format_exc():
+                    logging.debug("Rate limited - try again later")
+                    raise e
+
                 self.re_authenticate()
                 self.put_request(self.regional_base_url,
                                  f'/appliance/api/v2/appliances/{appliance.appliance_id}/command',
@@ -493,18 +509,20 @@ class Frigidaire:
 
         try:
             if response.headers.get('Content-Encoding') == 'gzip':
-                # Hack: Sometimes the server indicates "Content-Encoding: gzip" but does not send gzipped data
+                # Hack: Often, the server indicates "Content-Encoding: gzip" but does not send gzipped data
                 try:
                     data = gzip.decompress(response.content)
                     response_dict = json.loads(data.decode("utf-8"))
                 except gzip.BadGzipFile:
-                    logging.debug("Bad gzipped payload-- attempting to parse as plaintext")
                     response_dict = response.json()
+            elif response.content == b'':
+                # The server says it was JSON, but it was not
+                response_dict = {}
             else:
                 response_dict = response.json()
         except Exception as e:
             logging.error(e)
-            raise FrigidaireException(f'Received an unexpected response:\n{response.content}')
+            raise FrigidaireException(f'Received an unexpected response:\n{response.content}') from e
 
         return response_dict
 
@@ -512,9 +530,8 @@ class Frigidaire:
     def handle_request_exception(e: Exception, method: str, fullpath: str, headers: Dict[str, str], payload: str):
         logging.warning(e)
         error_str = f'Error processing request:\n{method} {fullpath}\nheaders={headers}\npayload={payload}\n'
-        'This may be safely ignored when used to test for a good connection in the authentication flow'
         logging.warning(error_str)
-        raise FrigidaireException(error_str)
+        raise FrigidaireException(error_str) from e
 
     def get_request(self, url: str, path: str, headers: Dict[str, str]) -> Union[Dict, List]:
         """
