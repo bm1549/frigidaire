@@ -202,13 +202,25 @@ class Action:
         return [Component(Setting.TARGET_HUMIDITY, humidity)]
 
     @classmethod
-    def set_temperature(cls, temperature: int) -> List[Component]:
+    def set_temperature_c(cls, temperature: int) -> List[Component]:
         # Note: Frigidaire sets limits for temperature which could cause this action to fail
         # Temperature ranges are below, inclusive of the endpoints
         #   Fahrenheit: 60-90
         #   Celsius: 16-32
+        logging.debug("Client setting target to {} C".format(temperature))
+
         return [
-            Component(Setting.TEMPERATURE_REPRESENTATION, Unit.FAHRENHEIT),
+            Component(Setting.TARGET_TEMPERATURE_C, temperature),
+        ]
+    @classmethod
+    def set_temperature_f(cls, temperature: int) -> List[Component]:
+        # Note: Frigidaire sets limits for temperature which could cause this action to fail
+        # Temperature ranges are below, inclusive of the endpoints
+        #   Fahrenheit: 60-90
+        #   Celsius: 16-32
+        logging.debug("Client setting target to {} F".format(temperature))
+
+        return [
             Component(Setting.TARGET_TEMPERATURE_F, temperature),
         ]
 
