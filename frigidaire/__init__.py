@@ -352,8 +352,13 @@ class Frigidaire:
         login_response = self.post_request(f'https://accounts.{identity_domain}', '/accounts.login',
                                            self.get_headers_auth("POST"), data, form_encoding=True)
 
-        auth_session_token = login_response['sessionInfo']['sessionToken']
-        auth_session_secret = login_response['sessionInfo']['sessionSecret']
+        session_info = login_response.get('sessionInfo')
+        if session_info is None or session_info.get('sessionToken') is None or session_info.get('sessionSecret') is None:
+            raise FrigidaireException(
+                f'Failed to authenticate, sessionInfo was not in response: {login_response}')
+
+        auth_session_token = session_info['sessionToken']
+        auth_session_secret = session_info['sessionSecret']
 
         data = {
             "apiKey": identity_api_key,
@@ -385,12 +390,13 @@ class Frigidaire:
                                                      self.get_headers_frigidaire("POST", include_bearer_token=False),
                                                      data)
 
-        if not frigidaire_auth_response.get('accessToken'):
+        access_token = frigidaire_auth_response.get('accessToken')
+        if access_token is None:
             raise FrigidaireException(
                 f'Failed to authenticate, accessToken was not in response: {frigidaire_auth_response}')
 
         logging.debug('Authentication successful, storing new session key')
-        self.session_key = frigidaire_auth_response['accessToken']
+        self.session_key = access_token
 
     def re_authenticate(self) -> None:
         """
