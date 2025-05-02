@@ -22,7 +22,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 GLOBAL_API_URL = 'https://api.ocp.electrolux.one'
 
-FRIGIDAIRE_API_KEY = 'UcGF9pmUMKUqBL6qcQvTu4K4WBmQ5KJqJXprCTdc'
+FRIGIDAIRE_API_KEY = '3BAfxFtCTdGbJ74udWvSe6ZdPugP8GcKz3nSJVfg'
 CLIENT_SECRET = '26SGRupOJaxv4Y1npjBsScjJPuj7f8YTdGxJak3nhAnowCStsBAEzKtrEHsgbqUyh90KFsoty7xXwMNuLYiSEcLqhGQryBM26i435hncaLqj5AuSvWaGNRTACi7ba5yu'
 CLIENT_ID = 'FrigidaireOneApp'
 FRIGIDAIRE_USER_AGENT = 'Ktor client'
@@ -230,7 +230,7 @@ class Frigidaire:
     """
 
     def __init__(self, username: str, password: str, session_key: Optional[str] = None, timeout: Optional[float] = None,
-                 regional_base_url: Optional[str] = None):
+                 regional_base_url: Optional[str] = None, country_code: Optional[str] = "US"):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
         :param username: The username to log in to Frigidaire. Generally, this is an email
@@ -241,12 +241,14 @@ class Frigidaire:
         :param regional_base_url: Regional base URL for the API user account
                             (e.g., https://api.us.ocp.electrolux.one for U.S. accounts). If not specified,
                             authentication is required
+        :param country_code: Country code from which to derive regional base URL. Defaults to "US".
         """
         self.username = username
         self.password = password
         self.session_key: Optional[str] = session_key
         self.timeout: Optional[float] = timeout
         self.regional_base_url = regional_base_url
+        self.country_code = country_code
 
         self.authenticate()
 
@@ -317,7 +319,7 @@ class Frigidaire:
         self.session_key = session_key_response['accessToken']
 
         identity_providers_response = self.get_request(GLOBAL_API_URL,
-                                                       f'/one-account-user/api/v1/identity-providers?brand=frigidaire&email={quote_plus(self.username)}&loginType=OTP',
+                                                       f'/one-account-user/api/v1/identity-providers?brand=frigidaire&countryCode={self.country_code}',
                                                        self.get_headers_frigidaire("GET", include_bearer_token=True))
         identity_domain = identity_providers_response[0]['domain']
         identity_api_key = identity_providers_response[0]['apiKey']
