@@ -38,6 +38,34 @@ class Destination(str, Enum):
     DEHUMIDIFIER = "DH"
 
 
+def _get_destination_from_model_name(model_name: str) -> Destination:
+    """
+    Maps known model names to their corresponding destination types.
+    Falls back to direct enum lookup for backward compatibility.
+    
+    :param model_name: The model name from the appliance data
+    :return: The appropriate Destination enum value
+    :raises ValueError: If the model name is not recognized
+    """
+    # Known model name mappings
+    model_mappings = {
+        "Husky": Destination.DEHUMIDIFIER,
+        # Add more model mappings here as they are discovered
+    }
+    
+    # Check if it's a known model name first
+    if model_name in model_mappings:
+        return model_mappings[model_name]
+    
+    # Fall back to direct enum lookup for backward compatibility
+    try:
+        return Destination(model_name)
+    except ValueError:
+        raise ValueError(f"'{model_name}' is not a recognized model name or destination type. "
+                        f"Known destinations: {list(Destination)}, "
+                        f"Known models: {list(model_mappings.keys())}")
+
+
 class Setting(str, Enum):
     """
     Writeable settings that are known valid names of Components.
@@ -106,7 +134,7 @@ class Appliance:
         self.appliance_id: str = args['applianceId']
         self.appliance_type: str = args['applianceData']['modelName']
         self.nickname: str = args['applianceData']['applianceName']
-        self.destination = Destination(self.appliance_type)
+        self.destination = _get_destination_from_model_name(self.appliance_type)
 
 
 class Component:
