@@ -38,32 +38,40 @@ class Destination(str, Enum):
     DEHUMIDIFIER = "DH"
 
 
-def _get_destination_from_model_name(model_name: str) -> Destination:
-    """
-    Maps known model names to their corresponding destination types.
-    Falls back to direct enum lookup for backward compatibility.
+# Define model mappings as a class attribute after the enum class is created
+Destination.MODEL_MAPPINGS = {
+    "Husky": Destination.DEHUMIDIFIER,
+    # Add more model mappings here as they are discovered
+}
+
+
+def _add_from_appliance_type():
+    @classmethod
+    def from_appliance_type(cls, appliance_type: str) -> 'Destination':
+        """
+        Maps known model names to their corresponding destination types.
+        Falls back to direct enum lookup for backward compatibility.
+        
+        :param appliance_type: The model name from the appliance data
+        :return: The appropriate Destination enum value
+        :raises ValueError: If the model name is not recognized
+        """
+        # Check if it's a known model name first
+        if appliance_type in cls.MODEL_MAPPINGS:
+            return cls.MODEL_MAPPINGS[appliance_type]
+        
+        # Fall back to direct enum lookup for backward compatibility
+        try:
+            return cls(appliance_type)
+        except ValueError:
+            raise ValueError(f"'{appliance_type}' is not a recognized model name or destination type. "
+                            f"Known destinations: {list(cls)}, "
+                            f"Known models: {list(cls.MODEL_MAPPINGS.keys())}")
     
-    :param model_name: The model name from the appliance data
-    :return: The appropriate Destination enum value
-    :raises ValueError: If the model name is not recognized
-    """
-    # Known model name mappings
-    model_mappings = {
-        "Husky": Destination.DEHUMIDIFIER,
-        # Add more model mappings here as they are discovered
-    }
-    
-    # Check if it's a known model name first
-    if model_name in model_mappings:
-        return model_mappings[model_name]
-    
-    # Fall back to direct enum lookup for backward compatibility
-    try:
-        return Destination(model_name)
-    except ValueError:
-        raise ValueError(f"'{model_name}' is not a recognized model name or destination type. "
-                        f"Known destinations: {list(Destination)}, "
-                        f"Known models: {list(model_mappings.keys())}")
+    Destination.from_appliance_type = from_appliance_type
+
+
+_add_from_appliance_type()
 
 
 class Setting(str, Enum):
@@ -134,7 +142,7 @@ class Appliance:
         self.appliance_id: str = args['applianceId']
         self.appliance_type: str = args['applianceData']['modelName']
         self.nickname: str = args['applianceData']['applianceName']
-        self.destination = _get_destination_from_model_name(self.appliance_type)
+        self.destination = Destination.from_appliance_type(self.appliance_type)
 
 
 class Component:
