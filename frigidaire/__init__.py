@@ -592,3 +592,12 @@ class Frigidaire:
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "PUT", f'{url}{path}', headers, encoded_data)
+
+# ---- Auto-enable write rate limiting (safe no-op if already enabled) ----
+try:
+    from .rl_autowrap import enable_autowrap as _frigidaire_enable_autowrap
+    _frigidaire_enable_autowrap()
+except Exception:
+    # Don't fail imports if autowrap can't be enabled
+    pass
+# -------------------------------------------------------------------------
