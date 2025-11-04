@@ -14,9 +14,9 @@ source "$repo_root/.venv/bin/activate"
 pip install -e "$repo_root"
 
 # Prompt for creds if not provided via env (password hidden)
-if [[ -z "${FRIGIDAIRE_EMAIL:-}" ]]; then
-  read -r -p "Frigidaire email: " FRIGIDAIRE_EMAIL
-  export FRIGIDAIRE_EMAIL
+if [[ -z "${FRIGIDAIRE_USERNAME:-}" ]]; then
+  read -r -p "Frigidaire username: " FRIGIDAIRE_USERNAME
+  export FRIGIDAIRE_USERNAME
 fi
 if [[ -z "${FRIGIDAIRE_PASSWORD:-}" ]]; then
   read -r -s -p "Frigidaire password: " FRIGIDAIRE_PASSWORD

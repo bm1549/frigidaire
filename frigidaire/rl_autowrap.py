@@ -41,11 +41,11 @@ def enable_autowrap() -> None:
 
     orig_init = Frigidaire.__init__
 
-    def __init__(self, email: str, password: str, *args: Any, **kwargs: Any):
+    def __init__(self, username: str, password: str, *args: Any, **kwargs: Any):
         _rl_min = float(kwargs.pop("rate_limit_min_interval", 1.25))
         _rl_jit = float(kwargs.pop("rate_limit_jitter", 0.25))
         _rl_methods: Set[str] = kwargs.pop("rate_limit_methods", None) or RL_DEFAULT_METHODS
-        _rl_scope = kwargs.pop("rate_limit_scope_key", None) or email
+        _rl_scope = kwargs.pop("rate_limit_scope_key", None) or username
         _max_retry_after = float(kwargs.pop("max_retry_after", 60.0))
         _max_retries_on_429 = int(kwargs.pop("max_retries_on_429", 4))
 
@@ -54,7 +54,7 @@ def enable_autowrap() -> None:
         if _http_timeout is None:
             _http_timeout = 15.0
 
-        orig_init(self, email, password, *args, **kwargs)
+        orig_init(self, username, password, *args, **kwargs)
 
         global _SCOPED_LIMITERS
         try:
