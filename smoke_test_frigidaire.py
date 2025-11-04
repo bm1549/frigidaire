@@ -28,21 +28,21 @@ def main():
     enable_autowrap()  # enable wrapper if the library supports it
 
     p = argparse.ArgumentParser(description="Frigidaire library smoke tests (no device writes).")
-    p.add_argument("--email", help="Account email (or env FRIGIDAIRE_EMAIL)")
+    p.add_argument("--username", help="Account username (or env FRIGIDAIRE_USERNAME)")
     p.add_argument("--password", help="Account password (or env FRIGIDAIRE_PASSWORD)")
     p.add_argument("--min-interval", type=float, default=1.5)
     p.add_argument("--jitter", type=float, default=0.0)
     p.add_argument("--http-timeout", type=str, default="15.0")  # float or "connect,read"
     args = p.parse_args()
 
-    email = env_or(args.email, "FRIGIDAIRE_EMAIL")
+    username = env_or(args.username, "FRIGIDAIRE_USERNAME")
     password = env_or(args.password, "FRIGIDAIRE_PASSWORD")
-    if not email or not password:
-        print("ERROR: provide --email/--password or set FRIGIDAIRE_EMAIL/FRIGIDAIRE_PASSWORD", file=sys.stderr); return 2
+    if not username or not password:
+        print("ERROR: provide --email/--password or set FRIGIDAIRE_USERNAME/FRIGIDAIRE_PASSWORD", file=sys.stderr); return 2
 
     print("== Frigidaire smoke tests ==")
     print("Auth → list appliances (read-only) ...")
-    api = Frigidaire(email, password,
+    api = Frigidaire(username=username, password=password,
                      rate_limit_min_interval=args.min_interval,
                      rate_limit_jitter=args.jitter,
                      http_timeout=args.http_timeout)
