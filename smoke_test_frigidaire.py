@@ -38,7 +38,7 @@ def main():
     username = env_or(args.username, "FRIGIDAIRE_USERNAME")
     password = env_or(args.password, "FRIGIDAIRE_PASSWORD")
     if not username or not password:
-        print("ERROR: provide --email/--password or set FRIGIDAIRE_USERNAME/FRIGIDAIRE_PASSWORD", file=sys.stderr); return 2
+        print("ERROR: provide --username/--password or set FRIGIDAIRE_USERNAME/FRIGIDAIRE_PASSWORD", file=sys.stderr); return 2
 
     print("== Frigidaire smoke tests ==")
     print("Auth → list appliances (read-only) ...")
