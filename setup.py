@@ -4,7 +4,7 @@ with open("README.md", "r") as fh:
     long_description = fh.read()
 
 # Overridden by publish GH Action
-version = "SNAPSHOT"
+version = "0.0.0-dev"
 
 print("Using version " + version)
 
