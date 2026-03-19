@@ -38,11 +38,19 @@ class Destination(str, Enum):
     DEHUMIDIFIER = "DH"
 
 
-# Define model mappings as a class attribute after the enum class is created
+# Maps known Electrolux internal platform codenames to destination types.
+# These codenames appear in applianceData.modelName for newer devices instead
+# of the legacy "AC"/"DH" values. Add new entries here as they are confirmed.
 Destination.MODEL_MAPPINGS = {
-    "Husky": Destination.DEHUMIDIFIER,
-    # Add more model mappings here as they are discovered
+    "Husky": Destination.DEHUMIDIFIER,   # e.g. FHDD5033W1 (50-pint WiFi dehumidifier)
+    "Panther": Destination.AIR_CONDITIONER,  # e.g. FHWW105WE1 (window inverter AC)
+    "Telica": Destination.AIR_CONDITIONER,   # e.g. GHPH142AA1 (portable inverter AC/heat)
 }
+
+# Reported property keys that are unique to each destination type.
+# Used to infer destination when the codename is not in MODEL_MAPPINGS.
+_AC_PROPERTY_KEYS = {"targetTemperatureC", "targetTemperatureF", "ambientTemperatureC", "ambientTemperatureF", "temperatureRepresentation"}
+_DH_PROPERTY_KEYS = {"targetHumidity", "sensorHumidity", "waterBucketLevel"}
 
 
 def _add_from_appliance_type():
@@ -142,7 +150,40 @@ class Appliance:
         self.appliance_id: str = args['applianceId']
         self.appliance_type: str = args['applianceData']['modelName']
         self.nickname: str = args['applianceData']['applianceName']
-        self.destination = Destination.from_appliance_type(self.appliance_type)
+        self.destination = self._resolve_destination(args)
+
+    def _resolve_destination(self, args: Dict) -> Optional['Destination']:
+        # 1. Try MODEL_MAPPINGS and direct enum lookup ("AC"/"DH")
+        try:
+            return Destination.from_appliance_type(self.appliance_type)
+        except ValueError:
+            pass
+
+        # 2. Infer from reported property keys (works for any unknown codename)
+        reported = args.get('properties', {}).get('reported', {})
+        reported_keys = set(reported.keys())
+        if reported_keys & _AC_PROPERTY_KEYS:
+            logging.warning(
+                f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
+                f"({self.appliance_id}) — inferred AIR_CONDITIONER from reported properties. "
+                f"Please report this at https://github.com/bm1549/frigidaire/issues"
+            )
+            return Destination.AIR_CONDITIONER
+        if reported_keys & _DH_PROPERTY_KEYS:
+            logging.warning(
+                f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
+                f"({self.appliance_id}) — inferred DEHUMIDIFIER from reported properties. "
+                f"Please report this at https://github.com/bm1549/frigidaire/issues"
+            )
+            return Destination.DEHUMIDIFIER
+
+        # 3. Give up — caller should skip this appliance
+        logging.warning(
+            f"Unrecognized appliance type '{self.appliance_type}' for '{self.nickname}' "
+            f"({self.appliance_id}) — skipping. Reported keys: {sorted(reported_keys)}. "
+            f"Please report this at https://github.com/bm1549/frigidaire/issues"
+        )
+        return None
 
 
 class Component:
@@ -452,15 +493,15 @@ class Frigidaire:
         """
         logging.debug('Listing appliances')
 
-        def generate_appliance(raw_appliance: Union[Dict, List]) -> Appliance:
+        def generate_appliance(raw_appliance: Union[Dict, List]) -> Optional[Appliance]:
             """
-            Generates an appliance given a raw_appliance. This will make a second call to the Frigidaire appliance
-            details to figure out what source we should be using. We discard the rest of the response from appliance
-            details since everything else (except for source) is subject to change later on
+            Generates an appliance given a raw_appliance.
+            Returns None if the appliance type cannot be resolved.
             :param raw_appliance: The raw output of the Frigidaire API for the appliance
-            :return: The appliance augmented with a destination
+            :return: The appliance, or None if the destination type is unrecognized
             """
-            return Appliance(raw_appliance)
+            appliance = Appliance(raw_appliance)
+            return appliance if appliance.destination is not None else None
 
         def get_appliances_inner():
             """
@@ -472,7 +513,7 @@ class Frigidaire:
                                           '/appliance/api/v2/appliances?includeMetadata=true',
                                           self.get_headers_frigidaire("GET", include_bearer_token=True))
 
-            return list(map(generate_appliance, appliances))
+            return [appliance for appliance in map(generate_appliance, appliances) if appliance is not None]
 
         try:
             return get_appliances_inner()
