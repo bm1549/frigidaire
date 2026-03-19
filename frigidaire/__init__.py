@@ -513,7 +513,7 @@ class Frigidaire:
                                           '/appliance/api/v2/appliances?includeMetadata=true',
                                           self.get_headers_frigidaire("GET", include_bearer_token=True))
 
-            return [a for a in map(generate_appliance, appliances) if a is not None]
+            return [appliance for appliance in map(generate_appliance, appliances) if appliance is not None]
 
         try:
             return get_appliances_inner()
