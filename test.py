@@ -1,7 +1,7 @@
 import configparser
 import logging
 
-from frigidaire import Action, Power, Mode, FanSpeed, Frigidaire
+from frigidaire import Action, Power, Mode, FanSpeed, VerticalSwing, SleepMode, Frigidaire, Unit
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.DEBUG)
@@ -61,7 +61,47 @@ if __name__ == '__main__':
 
     # set temperature to 75
     logging.debug("set temp to 75")
-    frigidaire.execute_action(appliance, Action.set_temperature(75))
+    frigidaire.execute_action(appliance, Action.set_temperature(22, Unit.CELSIUS))
+
+    # set vertical swing ON
+    logging.debug("set vertical swing ON")
+    frigidaire.execute_action(appliance, Action.set_vertical_swing(VerticalSwing.ON))
+
+    # set vertical swing OFF
+    logging.debug("set vertical swing OFF")
+    frigidaire.execute_action(appliance, Action.set_vertical_swing(VerticalSwing.OFF))
+
+    # set ui lock mode ON
+    logging.debug("set ui lock mode ON")
+    frigidaire.execute_action(appliance, Action.set_ui_lock_mode(True))
+
+    # set ui lock mode OFF
+    logging.debug("set ui lock mode OFF")
+    frigidaire.execute_action(appliance, Action.set_ui_lock_mode(False))
+
+    # set sleep mode ON
+    logging.debug("set sleep mode ON")
+    frigidaire.execute_action(appliance, Action.set_sleep_mode(SleepMode.ON))
+
+    # set sleep mode OFF
+    logging.debug("set sleep mode OFF")
+    frigidaire.execute_action(appliance, Action.set_sleep_mode(SleepMode.OFF))
+
+    # set start time
+    logging.debug("set start time")
+    frigidaire.execute_action(appliance, Action.set_start_time(60))
+
+    # set start time
+    logging.debug("set start time")
+    frigidaire.execute_action(appliance, Action.set_start_time(0))
+
+    # set stop time
+    logging.debug("set stop time")
+    frigidaire.execute_action(appliance, Action.set_stop_time(60))
+
+    # set stop time
+    logging.debug("set stop time")
+    frigidaire.execute_action(appliance, Action.set_stop_time(0))
 
     # re-authenticate the connection to get a new session_key
     logging.debug("re-authenticate")

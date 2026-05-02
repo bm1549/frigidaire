@@ -16,7 +16,7 @@ setuptools.setup(
     license="MIT",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/bm1549/frigidaire",
+    url="https://github.com/kriodoxis/frigidaire",
     packages=setuptools.find_packages(),
     install_requires=[
         "certifi>=2020.12.5",
