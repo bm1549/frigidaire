@@ -87,6 +87,18 @@ if __name__ == "__main__":
     logging.debug("set sleep mode OFF")
     frigidaire.execute_action(appliance, Action.set_sleep_mode(SleepMode.OFF))
 
+    # set stop time
+    logging.debug("set stop time")
+    frigidaire.execute_action(appliance, Action.set_stop_time(1800))
+
+    # clear stop time
+    logging.debug("clear stop time")
+    frigidaire.execute_action(appliance, Action.set_stop_time(0))
+
+    # turn off, start time only works when the unit is off, so we turn it off here
+    logging.debug("turn off")
+    frigidaire.execute_action(appliance, Action.set_power(Power.OFF))
+
     # set start time
     logging.debug("set start time")
     frigidaire.execute_action(appliance, Action.set_start_time(1800))
@@ -94,18 +106,6 @@ if __name__ == "__main__":
     # clear start time
     logging.debug("clear start time")
     frigidaire.execute_action(appliance, Action.set_start_time(0))
-
-    # turn off
-    logging.debug("turn off")
-    frigidaire.execute_action(appliance, Action.set_power(Power.OFF))
-
-    # set stop time, only works when the appliance is off
-    logging.debug("set stop time")
-    frigidaire.execute_action(appliance, Action.set_stop_time(1800))
-
-    # clear stop time
-    logging.debug("clear stop time")
-    frigidaire.execute_action(appliance, Action.set_stop_time(0))
 
     # re-authenticate the connection to get a new session_key
     logging.debug("re-authenticate")
