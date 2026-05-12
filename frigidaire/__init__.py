@@ -43,6 +43,7 @@ class Destination(str, Enum):
 # of the legacy "AC"/"DH" values. Add new entries here as they are confirmed.
 Destination.MODEL_MAPPINGS = {
     "Husky": Destination.DEHUMIDIFIER,   # e.g. FHDD5033W1 (50-pint WiFi dehumidifier)
+    "Eagle": Destination.DEHUMIDIFIER,   # e.g. GHDD5035W1 (50-pint Gallery WiFi dehumidifier)
     "Panther": Destination.AIR_CONDITIONER,  # e.g. FHWW105WE1 (window inverter AC)
     "Telica": Destination.AIR_CONDITIONER,   # e.g. GHPH142AA1 (portable inverter AC/heat)
 }
@@ -159,16 +160,12 @@ class Appliance:
         except ValueError:
             pass
 
-        # 2. Infer from reported property keys (works for any unknown codename)
+        # 2. Infer from reported property keys (works for any unknown codename).
+        # Check DH first: humidity/water-bucket keys are DH-exclusive, while the
+        # "AC" keys (ambient temperature, temperature representation) are also
+        # reported by dehumidifiers that display room temp.
         reported = args.get('properties', {}).get('reported', {})
         reported_keys = set(reported.keys())
-        if reported_keys & _AC_PROPERTY_KEYS:
-            logging.warning(
-                f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
-                f"({self.appliance_id}) — inferred AIR_CONDITIONER from reported properties. "
-                f"Please report this at https://github.com/bm1549/frigidaire/issues"
-            )
-            return Destination.AIR_CONDITIONER
         if reported_keys & _DH_PROPERTY_KEYS:
             logging.warning(
                 f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
@@ -176,6 +173,13 @@ class Appliance:
                 f"Please report this at https://github.com/bm1549/frigidaire/issues"
             )
             return Destination.DEHUMIDIFIER
+        if reported_keys & _AC_PROPERTY_KEYS:
+            logging.warning(
+                f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
+                f"({self.appliance_id}) — inferred AIR_CONDITIONER from reported properties. "
+                f"Please report this at https://github.com/bm1549/frigidaire/issues"
+            )
+            return Destination.AIR_CONDITIONER
 
         # 3. Give up — caller should skip this appliance
         logging.warning(
