@@ -1,15 +1,22 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
+
 import random
 import threading
 import time
-from typing import Callable, Optional, Set, Union, Tuple
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-RL_DEFAULT_METHODS: Set[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-TimeoutType = Union[float, Tuple[float, float]]  # requests supports float or (connect, read)
+if TYPE_CHECKING:
+    import requests
+
+RL_DEFAULT_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+TimeoutType = float | tuple[float, float]  # requests supports float or (connect, read)
+
 
 class RateLimiter:
     """Thread-safe limiter that ensures at least `min_interval` seconds between calls."""
+
     def __init__(self, min_interval: float = 1.25, jitter: float = 0.0) -> None:
         self._min = max(0.0, float(min_interval))
         self._jitter = max(0.0, float(jitter))
@@ -30,7 +37,8 @@ class RateLimiter:
         with self._lock:
             self._next_ok_at = max(self._next_ok_at, time.monotonic() + float(extra_seconds))
 
-def _parse_retry_after_seconds(value: Optional[str]) -> Optional[float]:
+
+def _parse_retry_after_seconds(value: str | None) -> float | None:
     if not value:
         return None
     try:
@@ -38,14 +46,15 @@ def _parse_retry_after_seconds(value: Optional[str]) -> Optional[float]:
     except Exception:
         return None
 
+
 def wrap_session_request(
-    request_func: Callable[..., "requests.Response"],
-    limiter: "RateLimiter",
-    rl_methods: Set[str] = RL_DEFAULT_METHODS,
+    request_func: Callable[..., requests.Response],
+    limiter: RateLimiter,
+    rl_methods: frozenset[str] | set[str] = RL_DEFAULT_METHODS,
     max_retry_after: float = 60.0,
     max_retries_on_429: int = 4,
-    default_timeout: Optional[TimeoutType] = 15.0,
-) -> Callable[..., "requests.Response"]:
+    default_timeout: TimeoutType | None = 15.0,
+) -> Callable[..., requests.Response]:
     """Wrap requests.Session.request with rate limiting, 429 handling, and default timeout."""
     import time as _time
 

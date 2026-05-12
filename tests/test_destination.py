@@ -7,7 +7,6 @@ import pytest
 from frigidaire import Appliance, Destination
 from tests.conftest import make_raw_appliance as _raw
 
-
 # --- Destination.from_appliance_type ---
 
 
