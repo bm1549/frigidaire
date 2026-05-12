@@ -25,6 +25,14 @@ setuptools.setup(
         "requests>=2.25.1",
         "urllib3>=1.26.4",
     ],
+    extras_require={
+        "dev": [
+            "pytest>=7.0",
+            "pytest-cov>=4.0",
+            "responses>=0.23",
+            "freezegun>=1.2",
+        ],
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
