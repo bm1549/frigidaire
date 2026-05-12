@@ -1,28 +1,47 @@
 #!/usr/bin/env python3
-import argparse, json, os, sys, time, requests
+import argparse
+import json
+import os
+import sys
+import time
 from dataclasses import asdict, is_dataclass
 
-from frigidaire import Frigidaire
-from frigidaire.rl_autowrap import enable_autowrap
-from frigidaire.rate_limit import RateLimiter, wrap_session_request
+import requests
 
-def env_or(v,k): return v if v else os.getenv(k)
+from frigidaire import Frigidaire
+from frigidaire.rate_limit import RateLimiter, wrap_session_request
+from frigidaire.rl_autowrap import enable_autowrap
+
+
+def env_or(v, k):
+    return v if v else os.getenv(k)
+
+
 def _normalize(o):
-    if o is None or isinstance(o,(str,int,float,bool)): return o
-    if isinstance(o,dict): return {k:_normalize(v) for k,v in o.items()}
-    if isinstance(o,(list,tuple)): return [_normalize(x) for x in o]
+    if o is None or isinstance(o, (str, int, float, bool)):
+        return o
+    if isinstance(o, dict):
+        return {k: _normalize(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_normalize(x) for x in o]
     try:
-        if is_dataclass(o): return _normalize(asdict(o))
-    except Exception: pass
-    if hasattr(o,"__dict__"): return {k:_normalize(v) for k,v in o.__dict__.items() if not k.startswith("_")}
+        if is_dataclass(o):
+            return _normalize(asdict(o))
+    except Exception:
+        pass
+    if hasattr(o, "__dict__"):
+        return {k: _normalize(v) for k, v in o.__dict__.items() if not k.startswith("_")}
     return str(o)
+
 
 def _find_session(api):
     # Try common attribute names; ensure it has a .request method
-    for name in ("_session","session","client","http","_http","_client"):
+    for name in ("_session", "session", "client", "http", "_http", "_client"):
         s = getattr(api, name, None)
-        if s and hasattr(s, "request"): return s
+        if s and hasattr(s, "request"):
+            return s
     return None
+
 
 def main():
     enable_autowrap()  # enable wrapper if the library supports it
@@ -38,22 +57,27 @@ def main():
     username = env_or(args.username, "FRIGIDAIRE_USERNAME")
     password = env_or(args.password, "FRIGIDAIRE_PASSWORD")
     if not username or not password:
-        print("ERROR: provide --username/--password or set FRIGIDAIRE_USERNAME/FRIGIDAIRE_PASSWORD", file=sys.stderr); return 2
+        print("ERROR: provide --username/--password or set FRIGIDAIRE_USERNAME/FRIGIDAIRE_PASSWORD", file=sys.stderr)
+        return 2
 
     print("== Frigidaire smoke tests ==")
     print("Auth → list appliances (read-only) ...")
-    api = Frigidaire(username=username, password=password,
-                     rate_limit_min_interval=args.min_interval,
-                     rate_limit_jitter=args.jitter,
-                     http_timeout=args.http_timeout)
+    api = Frigidaire(
+        username=username,
+        password=password,
+        rate_limit_min_interval=args.min_interval,
+        rate_limit_jitter=args.jitter,
+        http_timeout=args.http_timeout,
+    )
 
     # 1) List appliances (read-only)
     try:
         appliances = api.get_appliances()
     except Exception as e:
-        print(f"FAIL: get_appliances raised: {e}", file=sys.stderr); return 3
+        print(f"FAIL: get_appliances raised: {e}", file=sys.stderr)
+        return 3
     print(json.dumps(_normalize(appliances), indent=2))
-    print(f"Found {len(appliances) if isinstance(appliances,(list,tuple)) else 'N/A'} appliance(s). ✓")
+    print(f"Found {len(appliances) if isinstance(appliances, (list, tuple)) else 'N/A'} appliance(s). ✓")
 
     # resolve a requests-like session to use for the network-only checks
     sess = _find_session(api)
@@ -79,12 +103,13 @@ def main():
     t0 = time.monotonic()
     for i in range(N):
         r = sess.post("https://httpbin.org/status/200")
-        print(f"POST {i}: {r.status_code}  t={time.monotonic()-t0:.2f}s")
+        print(f"POST {i}: {r.status_code}  t={time.monotonic() - t0:.2f}s")
     elapsed = time.monotonic() - t0
     expected = (N - 1) * float(args.min_interval)
     print(f"Elapsed: {elapsed:.2f}s (expected >= {expected:.2f}s)")
     if elapsed + 0.05 < expected:
-        print("FAIL: elapsed time shorter than expected; rate limit may not be active!", file=sys.stderr); return 4
+        print("FAIL: elapsed time shorter than expected; rate limit may not be active!", file=sys.stderr)
+        return 4
     print("Rate-limit spacing ✓")
 
     # 4) Retry-After handling (GET 429 with Retry-After=2)
@@ -95,7 +120,9 @@ def main():
     dt = time.monotonic() - t0
     print(f"HTTP {r.status_code}, elapsed ~{dt:.2f}s (should be >= ~2s due to Retry-After)")
 
-    print("\nAll smoke tests finished."); return 0
+    print("\nAll smoke tests finished.")
+    return 0
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
