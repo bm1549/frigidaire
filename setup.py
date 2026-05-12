@@ -1,6 +1,6 @@
 import setuptools
 
-with open("README.md", "r") as fh:
+with open("README.md") as fh:
     long_description = fh.read()
 
 # Overridden by publish GH Action
@@ -9,7 +9,7 @@ version = "0.0.0-dev"
 print("Using version " + version)
 
 setuptools.setup(
-    name='frigidaire',
+    name="frigidaire",
     version=version,
     author="Brian Marks",
     description="Python API for the Frigidaire 2.0 App",
@@ -31,11 +31,15 @@ setuptools.setup(
             "pytest-cov>=4.0",
             "responses>=0.23",
             "freezegun>=1.2",
+            "ruff>=0.5.0",
+            "mypy>=1.8",
+            "types-requests",
+            "pre-commit>=3.0",
         ],
     },
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
-     ],
- )
+    ],
+)

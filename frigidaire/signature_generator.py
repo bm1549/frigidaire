@@ -2,19 +2,16 @@
 # Licensed under Apache 2.0, a copy of which is enclosed in this repository
 
 import base64
+import hashlib
 import hmac
 import urllib.parse
-import hashlib
 from collections import OrderedDict
-from typing import Optional
 
 
 def _build_encoded_query(params: dict) -> str:
     if not params:
         return ""
-    return "&".join(
-        f"{key}={urllib.parse.quote_plus(str(value))}" for key, value in params.items() if value
-    )
+    return "&".join(f"{key}={urllib.parse.quote_plus(str(value))}" for key, value in params.items() if value)
 
 
 def _url_encode(value: str) -> str:
@@ -27,7 +24,7 @@ def _encode_signature(base_signature: str, secret: str) -> str:
     return base64.urlsafe_b64encode(signing_key.digest()).decode("utf-8")
 
 
-def get_signature(secret: str, http_method: str, url: str, params: dict) -> Optional[str]:
+def get_signature(secret: str, http_method: str, url: str, params: dict) -> str | None:
     if not all([params, url, http_method, secret]):
         return None
 
@@ -43,7 +40,9 @@ def get_signature(secret: str, http_method: str, url: str, params: dict) -> Opti
                 fragment="",
             )
         )
-        base_signature = f"{http_method.upper()}&{_url_encode(normalized_url)}&{_url_encode(_build_encoded_query(params))}"
+        base_signature = (
+            f"{http_method.upper()}&{_url_encode(normalized_url)}&{_url_encode(_build_encoded_query(params))}"
+        )
         return _encode_signature(base_signature, secret)
     except Exception as ex:
         print(f"Error generating signature: {ex}")

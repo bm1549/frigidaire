@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple, Union, Set
-from .rate_limit import RateLimiter, RL_DEFAULT_METHODS, wrap_session_request
+from typing import Any
 
-TimeoutType = Union[float, Tuple[float, float]]
+from .rate_limit import RL_DEFAULT_METHODS, RateLimiter, wrap_session_request
+
+TimeoutType = float | tuple[float, float]
 _ENABLED = False
+_SCOPED_LIMITERS: dict[str, RateLimiter] = {}
 
-def _coerce_timeout(val: Any) -> Optional[TimeoutType]:
+
+def _coerce_timeout(val: Any) -> TimeoutType | None:
     if val is None:
         return None
     if isinstance(val, (int, float)):
@@ -25,6 +28,7 @@ def _coerce_timeout(val: Any) -> Optional[TimeoutType]:
             return None
     return None
 
+
 def enable_autowrap() -> None:
     global _ENABLED
     if _ENABLED:
@@ -41,10 +45,10 @@ def enable_autowrap() -> None:
 
     orig_init = Frigidaire.__init__
 
-    def __init__(self, username: str, password: str, *args: Any, **kwargs: Any):
+    def __init__(self: Any, username: str, password: str, *args: Any, **kwargs: Any) -> None:
         _rl_min = float(kwargs.pop("rate_limit_min_interval", 1.25))
         _rl_jit = float(kwargs.pop("rate_limit_jitter", 0.25))
-        _rl_methods: Set[str] = kwargs.pop("rate_limit_methods", None) or RL_DEFAULT_METHODS
+        _rl_methods: frozenset[str] | set[str] = kwargs.pop("rate_limit_methods", None) or RL_DEFAULT_METHODS
         _rl_scope = kwargs.pop("rate_limit_scope_key", None) or username
         _max_retry_after = float(kwargs.pop("max_retry_after", 60.0))
         _max_retries_on_429 = int(kwargs.pop("max_retries_on_429", 4))
@@ -56,16 +60,11 @@ def enable_autowrap() -> None:
 
         orig_init(self, username, password, *args, **kwargs)
 
-        global _SCOPED_LIMITERS
-        try:
-            _SCOPED_LIMITERS  # type: ignore[name-defined]
-        except NameError:
-            _SCOPED_LIMITERS = {}  # type: ignore[assignment]
         limiter = _SCOPED_LIMITERS.setdefault(_rl_scope, RateLimiter(_rl_min, _rl_jit))
 
         try:
-            self._session.request = wrap_session_request(  # type: ignore[attr-defined]
-                self._session.request,  # type: ignore[attr-defined]
+            self._session.request = wrap_session_request(
+                self._session.request,
                 limiter,
                 _rl_methods,
                 _max_retry_after,
@@ -75,6 +74,6 @@ def enable_autowrap() -> None:
         except Exception:
             pass
 
-    Frigidaire.__init__ = __init__  # type: ignore[method-assign]
-    Frigidaire._rl_patched = True  # type: ignore[attr-defined]
+    Frigidaire.__init__ = __init__
+    Frigidaire._rl_patched = True
     _ENABLED = True

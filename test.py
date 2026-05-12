@@ -1,9 +1,9 @@
 import configparser
 import logging
 
-from frigidaire import Action, Power, Mode, FanSpeed, Frigidaire
+from frigidaire import Action, FanSpeed, Frigidaire, Mode, Power
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
 
     # Create a config file at config.ini to reduce the risk of accidentally committing credentials
@@ -16,13 +16,13 @@ if __name__ == '__main__':
     ; regional_base_url=https://api.us.ocp.electrolux.one
     """
     config = configparser.ConfigParser()
-    config.read('config.ini')
-    credentials = config['credentials'] or {}
+    config.read("config.ini")
+    credentials = config["credentials"] or {}
 
-    username = credentials.get('username')
-    password = credentials.get('password')
-    session_key = credentials.get('session_key', fallback=None)
-    regional_base_url = credentials.get('regional_base_url', fallback=None)
+    username = credentials.get("username")
+    password = credentials.get("password")
+    session_key = credentials.get("session_key", fallback=None)
+    regional_base_url = credentials.get("regional_base_url", fallback=None)
 
     frigidaire = Frigidaire(
         username,
