@@ -34,6 +34,30 @@ CLIENT_ID = "FrigidaireOneApp"
 FRIGIDAIRE_USER_AGENT = "Ktor client"
 AUTH_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 12; sdk_gphone64_x86_64 Build/SE1A.220826.008)"
 
+# Header names whose values are credentials; matched case-insensitively.
+_REDACT_HEADERS = frozenset({"authorization", "x-api-key"})
+
+# Top-level JSON keys whose values are credentials in auth-flow request bodies.
+_REDACT_PAYLOAD_KEYS = frozenset(
+    {"password", "clientSecret", "apiKey", "oauth_token", "idToken", "id_token", "sig", "accessToken"}
+)
+
+
+def _redact_headers(headers: dict[str, str]) -> dict[str, str]:
+    return {k: ("<redacted>" if k.lower() in _REDACT_HEADERS else v) for k, v in headers.items()}
+
+
+def _redact_payload(payload: str) -> str:
+    if not payload:
+        return payload
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return payload
+    if not isinstance(data, dict):
+        return payload
+    return json.dumps({k: ("<redacted>" if k in _REDACT_PAYLOAD_KEYS else v) for k, v in data.items()})
+
 
 class FrigidaireException(Exception):
     pass
@@ -634,8 +658,15 @@ class Frigidaire:
     def handle_request_exception(
         e: Exception, method: str, fullpath: str, headers: dict[str, str], payload: str
     ) -> NoReturn:
-        logging.warning(e)
-        error_str = f"Error processing request:\n{method} {fullpath}\nheaders={headers}\npayload={payload}\n"
+        # Don't log `e` directly: parse_response wraps response bodies into the
+        # exception message, and auth-endpoint bodies contain tokens. Callers
+        # who need it can inspect __cause__ on the raised exception.
+        safe_headers = _redact_headers(headers)
+        safe_payload = _redact_payload(payload)
+        error_str = (
+            f"Error processing request ({type(e).__name__}):\n"
+            f"{method} {fullpath}\nheaders={safe_headers}\npayload={safe_payload}\n"
+        )
         logging.warning(error_str)
         raise FrigidaireException(error_str) from e
 
