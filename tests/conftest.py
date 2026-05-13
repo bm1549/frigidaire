@@ -21,6 +21,7 @@ def _reset_scoped_limiters() -> None:
     """Each test gets a fresh limiter scope so spacing doesn't leak across tests."""
     _SCOPED_LIMITERS.clear()
 
+
 GLOBAL_URL = "https://api.ocp.electrolux.one"
 REGIONAL_URL = "https://api.us.ocp.electrolux.one"
 IDENTITY_DOMAIN = "us1-id.gigya.com"
