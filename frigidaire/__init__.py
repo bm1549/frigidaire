@@ -15,7 +15,7 @@ import requests
 import urllib3
 from requests import Response
 
-from .rate_limit import RL_DEFAULT_METHODS, RateLimiter, wrap_session_request
+from .rate_limit import RateLimiter, wrap_session_request
 from .signature_generator import get_signature
 
 T = TypeVar("T")
@@ -326,7 +326,7 @@ class Frigidaire:
         username: str,
         password: str,
         session_key: str | None = None,
-        timeout: float = 15.0,
+        timeout: float | None = 15.0,
         regional_base_url: str | None = None,
         country_code: str = "US",
         *,
@@ -358,7 +358,6 @@ class Frigidaire:
         self.username = username
         self.password = password
         self.session_key: str | None = session_key
-        self.timeout: float | None = timeout
         self.regional_base_url = regional_base_url
         self.country_code = country_code
 
@@ -368,7 +367,7 @@ class Frigidaire:
         self._session.request = wrap_session_request(  # type: ignore[method-assign]
             self._session.request,
             limiter,
-            rate_limit_methods or RL_DEFAULT_METHODS,
+            rate_limit_methods,
             max_retry_after,
             max_retries_on_429,
             default_timeout=timeout,

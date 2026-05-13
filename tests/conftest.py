@@ -66,6 +66,6 @@ def make_authenticated_client(**overrides: object) -> Frigidaire:
         "session_key": "valid-key",
         "regional_base_url": REGIONAL_URL,
         **NO_RATE_LIMIT,
+        **overrides,
     }
-    kwargs.update(overrides)
     return Frigidaire(**kwargs)  # type: ignore[arg-type]
