@@ -2,9 +2,24 @@
 
 import base64
 
+import pytest
 import responses
 
-from frigidaire import Appliance, Frigidaire
+from frigidaire import _SCOPED_LIMITERS, Appliance, Frigidaire
+
+# Default kwargs that disable rate limiting and 429 retries — tests should
+# spread these into Frigidaire() constructors so they run instantly.
+NO_RATE_LIMIT: dict[str, object] = {
+    "rate_limit_min_interval": 0.0,
+    "rate_limit_jitter": 0.0,
+    "max_retries_on_429": 0,
+}
+
+
+@pytest.fixture(autouse=True)
+def _reset_scoped_limiters() -> None:
+    """Each test gets a fresh limiter scope so spacing doesn't leak across tests."""
+    _SCOPED_LIMITERS.clear()
 
 GLOBAL_URL = "https://api.ocp.electrolux.one"
 REGIONAL_URL = "https://api.us.ocp.electrolux.one"
@@ -36,10 +51,21 @@ def make_appliance(model_name: str = "AC", appliance_id: str = "AC1", nickname: 
     return Appliance(make_raw_appliance(model_name=model_name, appliance_id=appliance_id, nickname=nickname))
 
 
-def make_authenticated_client() -> Frigidaire:
+def make_authenticated_client(**overrides: object) -> Frigidaire:
     """A Frigidaire client that skips the full auth flow by presenting a valid session_key.
+
+    Rate limiting and 429 retries are disabled by default to keep tests fast and deterministic;
+    callers exercising those features can pass them via overrides.
 
     Caller must be inside @responses.activate so the test_connection() GET is intercepted.
     """
     responses.add(responses.GET, USERS_CURRENT_URL, json={"id": "x"}, status=200)
-    return Frigidaire(username="u", password="p", session_key="valid-key", regional_base_url=REGIONAL_URL)
+    kwargs: dict[str, object] = {
+        "username": "u",
+        "password": "p",
+        "session_key": "valid-key",
+        "regional_base_url": REGIONAL_URL,
+        **NO_RATE_LIMIT,
+    }
+    kwargs.update(overrides)
+    return Frigidaire(**kwargs)  # type: ignore[arg-type]

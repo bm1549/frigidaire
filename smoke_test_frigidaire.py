@@ -10,7 +10,6 @@ import requests
 
 from frigidaire import Frigidaire
 from frigidaire.rate_limit import RateLimiter, wrap_session_request
-from frigidaire.rl_autowrap import enable_autowrap
 
 
 def env_or(v, k):
@@ -44,8 +43,6 @@ def _find_session(api):
 
 
 def main():
-    enable_autowrap()  # enable wrapper if the library supports it
-
     p = argparse.ArgumentParser(description="Frigidaire library smoke tests (no device writes).")
     p.add_argument("--username", help="Account username (or env FRIGIDAIRE_USERNAME)")
     p.add_argument("--password", help="Account password (or env FRIGIDAIRE_PASSWORD)")
@@ -67,7 +64,7 @@ def main():
         password=password,
         rate_limit_min_interval=args.min_interval,
         rate_limit_jitter=args.jitter,
-        http_timeout=args.http_timeout,
+        timeout=float(args.http_timeout) if "," not in args.http_timeout else 15.0,
     )
 
     # 1) List appliances (read-only)

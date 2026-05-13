@@ -15,6 +15,7 @@ import requests
 import urllib3
 from requests import Response
 
+from .rate_limit import RL_DEFAULT_METHODS, RateLimiter, wrap_session_request
 from .signature_generator import get_signature
 
 T = TypeVar("T")
@@ -33,6 +34,11 @@ CLIENT_SECRET = (
 CLIENT_ID = "FrigidaireOneApp"
 FRIGIDAIRE_USER_AGENT = "Ktor client"
 AUTH_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 12; sdk_gphone64_x86_64 Build/SE1A.220826.008)"
+
+# Limiters are keyed by account so multiple Frigidaire instances for the same
+# account share spacing — without this, a config-flow re-validation that runs
+# alongside a live entry would compete and trip cas_3403.
+_SCOPED_LIMITERS: dict[str, RateLimiter] = {}
 
 
 class FrigidaireException(Exception):
@@ -320,9 +326,16 @@ class Frigidaire:
         username: str,
         password: str,
         session_key: str | None = None,
-        timeout: float | None = None,
+        timeout: float = 15.0,
         regional_base_url: str | None = None,
-        country_code: str | None = "US",
+        country_code: str = "US",
+        *,
+        rate_limit_min_interval: float = 1.25,
+        rate_limit_jitter: float = 0.25,
+        rate_limit_methods: frozenset[str] | set[str] | None = None,
+        rate_limit_scope_key: str | None = None,
+        max_retries_on_429: int = 4,
+        max_retry_after: float = 60.0,
     ):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
@@ -330,11 +343,17 @@ class Frigidaire:
         :param password: The password to log in to Frigidaire
         :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
                             authentication is required
-        :param timeout: The amount of time in seconds to wait before timing out a request
+        :param timeout: Per-request HTTP timeout in seconds (default 15.0). None disables the default.
         :param regional_base_url: Regional base URL for the API user account
                             (e.g., https://api.us.ocp.electrolux.one for U.S. accounts). If not specified,
                             authentication is required
         :param country_code: Country code from which to derive regional base URL. Defaults to "US".
+        :param rate_limit_min_interval: Minimum seconds between mutating requests (default 1.25).
+        :param rate_limit_jitter: Random jitter added to spacing to smooth bursts (default 0.25).
+        :param rate_limit_methods: HTTP methods to throttle (default POST/PUT/PATCH/DELETE).
+        :param rate_limit_scope_key: Key for sharing a limiter across instances (default: username).
+        :param max_retries_on_429: Max retries on 429/423 before giving up (default 4).
+        :param max_retry_after: Cap on the server's Retry-After header in seconds (default 60.0).
         """
         self.username = username
         self.password = password
@@ -342,6 +361,18 @@ class Frigidaire:
         self.timeout: float | None = timeout
         self.regional_base_url = regional_base_url
         self.country_code = country_code
+
+        self._session = requests.Session()
+        scope = rate_limit_scope_key or username
+        limiter = _SCOPED_LIMITERS.setdefault(scope, RateLimiter(rate_limit_min_interval, rate_limit_jitter))
+        self._session.request = wrap_session_request(  # type: ignore[method-assign]
+            self._session.request,
+            limiter,
+            rate_limit_methods or RL_DEFAULT_METHODS,
+            max_retry_after,
+            max_retries_on_429,
+            default_timeout=timeout,
+        )
 
         self.authenticate()
 
@@ -648,7 +679,7 @@ class Frigidaire:
         :return: The contents of 'data' in the resulting json
         """
         try:
-            response = requests.get(f"{url}{path}", headers=headers, verify=False, timeout=self.timeout)
+            response = self._session.get(f"{url}{path}", headers=headers, verify=False)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "GET", f"{url}{path}", headers, "")
@@ -667,9 +698,7 @@ class Frigidaire:
         """
         try:
             encoded_data = urlencode(data) if form_encoding else json.dumps(data)
-            response = requests.post(
-                f"{url}{path}", data=encoded_data, headers=headers, verify=False, timeout=self.timeout
-            )
+            response = self._session.post(f"{url}{path}", data=encoded_data, headers=headers, verify=False)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "POST", f"{url}{path}", headers, json.dumps(data))
@@ -685,20 +714,7 @@ class Frigidaire:
         """
         encoded_data = json.dumps(data)
         try:
-            response = requests.put(
-                f"{url}{path}", data=encoded_data, headers=headers, verify=False, timeout=self.timeout
-            )
+            response = self._session.put(f"{url}{path}", data=encoded_data, headers=headers, verify=False)
             return self.parse_response(response)
         except Exception as e:
             self.handle_request_exception(e, "PUT", f"{url}{path}", headers, encoded_data)
-
-
-# ---- Auto-enable write rate limiting (safe no-op if already enabled) ----
-try:
-    from .rl_autowrap import enable_autowrap as _frigidaire_enable_autowrap
-
-    _frigidaire_enable_autowrap()
-except Exception:
-    # Don't fail imports if autowrap can't be enabled
-    pass
-# -------------------------------------------------------------------------
