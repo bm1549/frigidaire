@@ -18,13 +18,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/bm1549/frigidaire",
     packages=setuptools.find_packages(),
-    install_requires=[
-        "certifi>=2020.12.5",
-        "chardet>=4.0.0",
-        "idna>=2.10",
-        "requests>=2.25.1",
-        "urllib3>=1.26.4",
-    ],
+    install_requires=["requests>=2.25.1"],
     extras_require={
         "dev": [
             "pytest>=7.0",
