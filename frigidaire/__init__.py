@@ -240,6 +240,7 @@ class Unit(str, Enum):
 class ApplianceState(str, Enum):
     OFF = "OFF"
     RUNNING = "RUNNING"
+    DELAYED_START = "DELAYED_START"
 
 
 class FilterState(str, Enum):
@@ -250,6 +251,16 @@ class FilterState(str, Enum):
 
 
 class Power(str, Enum):
+    ON = "ON"
+    OFF = "OFF"
+
+
+class SleepMode(str, Enum):
+    ON = "ON"
+    OFF = "OFF"
+
+
+class VerticalSwing(str, Enum):
     ON = "ON"
     OFF = "OFF"
 
@@ -301,6 +312,34 @@ class Action:
     @classmethod
     def set_fan_speed(cls, fan_speed: FanSpeed) -> list[Component]:
         return [Component(Setting.FAN_SPEED, fan_speed)]
+
+    @classmethod
+    def set_ui_lock_mode(cls, ui_lock_mode: bool) -> list[Component]:
+        return [Component(Setting.UI_LOCK_MODE, ui_lock_mode)]
+
+    @classmethod
+    def set_vertical_swing(cls, vertical_swing: VerticalSwing) -> list[Component]:
+        return [Component(Setting.VERTICAL_SWING, vertical_swing)]
+
+    @classmethod
+    def set_sleep_mode(cls, sleep_mode: SleepMode) -> list[Component]:
+        return [Component(Setting.SLEEP_MODE, sleep_mode)]
+
+    @classmethod
+    def set_stop_time(cls, stop_time: int) -> list[Component]:
+        """Stop time in seconds; device snaps to ~30-min increments (min ~1800s, use 0 to clear)."""
+        if stop_time < 0:
+            raise FrigidaireException("StopTime must be greater than or equal to 0")
+
+        return [Component(Setting.STOP_TIME, stop_time)]
+
+    @classmethod
+    def set_start_time(cls, start_time: int) -> list[Component]:
+        """Start time in seconds; device snaps to ~30-min increments (min ~1800s, use 0 to clear)."""
+        if start_time < 0:
+            raise FrigidaireException("StartTime must be greater than or equal to 0")
+
+        return [Component(Setting.START_TIME, start_time)]
 
     @classmethod
     def set_humidity(cls, humidity: int) -> list[Component]:
