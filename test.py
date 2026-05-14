@@ -1,7 +1,18 @@
 import configparser
 import logging
 
-from frigidaire import Action, Power, Mode, FanSpeed, VerticalSwing, SleepMode, Frigidaire, Unit
+import configparser
+import logging
+
+from frigidaire import (
+    Action,
+    FanSpeed,
+    Frigidaire,
+    Mode,
+    Power,
+    SleepMode,
+    VerticalSwing,
+)
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
