@@ -256,13 +256,13 @@ class Power(str, Enum):
 
 
 class SleepMode(str, Enum):
-    ON = 'ON'
-    OFF = 'OFF'
+    ON = "ON"
+    OFF = "OFF"
 
 
 class VerticalSwing(str, Enum):
-    ON = 'ON'
-    OFF = 'OFF'
+    ON = "ON"
+    OFF = "OFF"
 
 
 class Alert(str, Enum):
