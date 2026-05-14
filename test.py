@@ -61,7 +61,7 @@ if __name__ == '__main__':
 
     # set temperature to 75
     logging.debug("set temp to 75")
-    frigidaire.execute_action(appliance, Action.set_temperature(22, Unit.CELSIUS))
+    frigidaire.execute_action(appliance, Action.set_temperature(75))
 
     # set vertical swing ON
     logging.debug("set vertical swing ON")
@@ -89,18 +89,22 @@ if __name__ == '__main__':
 
     # set start time
     logging.debug("set start time")
-    frigidaire.execute_action(appliance, Action.set_start_time(60))
+    frigidaire.execute_action(appliance, Action.set_start_time(1800))
 
-    # set start time
-    logging.debug("set start time")
+    # clear start time
+    logging.debug("clear start time")
     frigidaire.execute_action(appliance, Action.set_start_time(0))
 
-    # set stop time
-    logging.debug("set stop time")
-    frigidaire.execute_action(appliance, Action.set_stop_time(60))
+    # turn off
+    logging.debug("turn off")
+    frigidaire.execute_action(appliance, Action.set_power(Power.OFF))
 
-    # set stop time
+    # set stop time, only works when the appliance is off
     logging.debug("set stop time")
+    frigidaire.execute_action(appliance, Action.set_stop_time(1800))
+
+    # clear stop time
+    logging.debug("clear stop time")
     frigidaire.execute_action(appliance, Action.set_stop_time(0))
 
     # re-authenticate the connection to get a new session_key

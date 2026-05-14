@@ -296,15 +296,17 @@ class Action:
 
     @classmethod
     def set_stop_time(cls, stop_time: int) -> List[Component]:
+        """Stop time in seconds; device snaps to ~30-min increments (min ~1800s, use 0 to clear)."""
         if stop_time < 0:
-            raise FrigidaireException("StopTime must be greater than 0, inclusive")
+            raise FrigidaireException("StopTime must be greater than or equal to 0")
 
         return [Component(Setting.STOP_TIME, stop_time)]
 
     @classmethod
     def set_start_time(cls, start_time: int) -> List[Component]:
+        """Start time in seconds; device snaps to ~30-min increments (min ~1800s, use 0 to clear)."""
         if start_time < 0:
-            raise FrigidaireException("StartTime must be greater than 0, inclusive")
+            raise FrigidaireException("StartTime must be greater than or equal to 0")
 
         return [Component(Setting.START_TIME, start_time)]
 
