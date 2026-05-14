@@ -87,7 +87,7 @@ if __name__ == "__main__":
     logging.debug("set sleep mode OFF")
     frigidaire.execute_action(appliance, Action.set_sleep_mode(SleepMode.OFF))
 
-    # set stop time
+    # set stop time, only works when the appliance is on
     logging.debug("set stop time")
     frigidaire.execute_action(appliance, Action.set_stop_time(1800))
 
