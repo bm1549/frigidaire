@@ -54,4 +54,5 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         gh workflow run bump-ha-plugin.yml \
-          -f version="${{ steps.semvers.outputs.patch }}"
+          -f version="${{ steps.semvers.outputs.patch }}" \
+          -f previous_version="${{ steps.previoustag.outputs.tag }}"
