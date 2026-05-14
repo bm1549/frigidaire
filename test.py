@@ -1,9 +1,6 @@
 import configparser
 import logging
 
-import configparser
-import logging
-
 from frigidaire import (
     Action,
     FanSpeed,
