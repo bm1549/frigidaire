@@ -7,10 +7,6 @@ on:
         description: "frigidaire version to pin in the HA plugin manifest"
         required: true
         type: string
-      previous_version:
-        description: "previous frigidaire version (for the compare-view link in the PR body)"
-        required: true
-        type: string
 
 jobs:
   bump:
@@ -21,6 +17,11 @@ jobs:
         with:
           repository: bm1549/home-assistant-frigidaire
           token: ${{ secrets.HA_PLUGIN_TOKEN }}
+      - name: Capture currently pinned version
+        id: current
+        run: |
+          CURRENT=$(grep -oP '"frigidaire==\K[^"]+' custom_components/frigidaire/manifest.json)
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
       - name: Bump frigidaire pin in manifest
         env:
           VERSION: ${{ inputs.version }}
@@ -38,7 +39,7 @@ jobs:
             Automated bump of the `frigidaire` library pin to **${{ inputs.version }}**.
 
             - Release notes: https://github.com/bm1549/frigidaire/releases/tag/${{ inputs.version }}
-            - Diff: https://github.com/bm1549/frigidaire/compare/${{ inputs.previous_version }}...${{ inputs.version }}
+            - Diff: https://github.com/bm1549/frigidaire/compare/${{ steps.current.outputs.version }}...${{ inputs.version }}
             - PyPI: https://pypi.org/project/frigidaire/${{ inputs.version }}/
 
             Updates `custom_components/frigidaire/manifest.json`.
