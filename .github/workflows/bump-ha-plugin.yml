@@ -1,0 +1,45 @@
+name: Bump HA plugin manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "frigidaire version to pin in the HA plugin manifest"
+        required: true
+        type: string
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout home-assistant-frigidaire
+        uses: actions/checkout@v6
+        with:
+          repository: bm1549/home-assistant-frigidaire
+          token: ${{ secrets.HA_PLUGIN_TOKEN }}
+      - name: Capture currently pinned version
+        id: current
+        run: |
+          CURRENT=$(grep -oP '"frigidaire==\K[^"]+' custom_components/frigidaire/manifest.json)
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+      - name: Bump frigidaire pin in manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          sed -i 's/"frigidaire==[^"]*"/"frigidaire=='"$VERSION"'"/' \
+            custom_components/frigidaire/manifest.json
+      - name: Open PR in home-assistant-frigidaire
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.HA_PLUGIN_TOKEN }}
+          branch: auto-bump-frigidaire
+          title: "Bump frigidaire to ${{ inputs.version }}"
+          commit-message: "Bump frigidaire to ${{ inputs.version }}"
+          body: |
+            Automated bump of the `frigidaire` library pin to **${{ inputs.version }}**.
+
+            - Release notes: https://github.com/bm1549/frigidaire/releases/tag/${{ inputs.version }}
+            - Diff: https://github.com/bm1549/frigidaire/compare/${{ steps.current.outputs.version }}...${{ inputs.version }}
+            - PyPI: https://pypi.org/project/frigidaire/${{ inputs.version }}/
+
+            Updates `custom_components/frigidaire/manifest.json`.

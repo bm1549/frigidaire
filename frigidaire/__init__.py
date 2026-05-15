@@ -40,6 +40,30 @@ AUTH_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 12; sdk_gphone64_x86_64 Build
 # alongside a live entry would compete and trip cas_3403.
 _SCOPED_LIMITERS: dict[str, RateLimiter] = {}
 
+# Header names whose values are credentials; matched case-insensitively.
+_REDACT_HEADERS = frozenset({"authorization", "x-api-key"})
+
+# Top-level JSON keys whose values are credentials in auth-flow request bodies.
+_REDACT_PAYLOAD_KEYS = frozenset(
+    {"password", "clientSecret", "apiKey", "oauth_token", "idToken", "id_token", "sig", "accessToken"}
+)
+
+
+def _redact_headers(headers: dict[str, str]) -> dict[str, str]:
+    return {k: ("<redacted>" if k.lower() in _REDACT_HEADERS else v) for k, v in headers.items()}
+
+
+def _redact_payload(payload: str) -> str:
+    if not payload:
+        return payload
+    try:
+        data = json.loads(payload)
+    except (json.JSONDecodeError, TypeError):
+        return payload
+    if not isinstance(data, dict):
+        return payload
+    return json.dumps({k: ("<redacted>" if k in _REDACT_PAYLOAD_KEYS else v) for k, v in data.items()})
+
 
 class FrigidaireException(Exception):
     pass
@@ -222,6 +246,7 @@ class Unit(str, Enum):
 class ApplianceState(str, Enum):
     OFF = "OFF"
     RUNNING = "RUNNING"
+    DELAYED_START = "DELAYED_START"
 
 
 class FilterState(str, Enum):
@@ -232,6 +257,16 @@ class FilterState(str, Enum):
 
 
 class Power(str, Enum):
+    ON = "ON"
+    OFF = "OFF"
+
+
+class SleepMode(str, Enum):
+    ON = "ON"
+    OFF = "OFF"
+
+
+class VerticalSwing(str, Enum):
     ON = "ON"
     OFF = "OFF"
 
@@ -283,6 +318,34 @@ class Action:
     @classmethod
     def set_fan_speed(cls, fan_speed: FanSpeed) -> list[Component]:
         return [Component(Setting.FAN_SPEED, fan_speed)]
+
+    @classmethod
+    def set_ui_lock_mode(cls, ui_lock_mode: bool) -> list[Component]:
+        return [Component(Setting.UI_LOCK_MODE, ui_lock_mode)]
+
+    @classmethod
+    def set_vertical_swing(cls, vertical_swing: VerticalSwing) -> list[Component]:
+        return [Component(Setting.VERTICAL_SWING, vertical_swing)]
+
+    @classmethod
+    def set_sleep_mode(cls, sleep_mode: SleepMode) -> list[Component]:
+        return [Component(Setting.SLEEP_MODE, sleep_mode)]
+
+    @classmethod
+    def set_stop_time(cls, stop_time: int) -> list[Component]:
+        """Stop time in seconds; device snaps to ~30-min increments (min ~1800s, use 0 to clear)."""
+        if stop_time < 0:
+            raise FrigidaireException("StopTime must be greater than or equal to 0")
+
+        return [Component(Setting.STOP_TIME, stop_time)]
+
+    @classmethod
+    def set_start_time(cls, start_time: int) -> list[Component]:
+        """Start time in seconds; device snaps to ~30-min increments (min ~1800s, use 0 to clear)."""
+        if start_time < 0:
+            raise FrigidaireException("StartTime must be greater than or equal to 0")
+
+        return [Component(Setting.START_TIME, start_time)]
 
     @classmethod
     def set_humidity(cls, humidity: int) -> list[Component]:
@@ -664,8 +727,15 @@ class Frigidaire:
     def handle_request_exception(
         e: Exception, method: str, fullpath: str, headers: dict[str, str], payload: str
     ) -> NoReturn:
-        logging.warning(e)
-        error_str = f"Error processing request:\n{method} {fullpath}\nheaders={headers}\npayload={payload}\n"
+        # Don't log `e` directly: parse_response wraps response bodies into the
+        # exception message, and auth-endpoint bodies contain tokens. Callers
+        # who need it can inspect __cause__ on the raised exception.
+        safe_headers = _redact_headers(headers)
+        safe_payload = _redact_payload(payload)
+        error_str = (
+            f"Error processing request ({type(e).__name__}):\n"
+            f"{method} {fullpath}\nheaders={safe_headers}\npayload={safe_payload}\n"
+        )
         logging.warning(error_str)
         raise FrigidaireException(error_str) from e
 

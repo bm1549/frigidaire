@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0 # Required so the previous-tag action can see the full tag history
     - name: 'Get Previous tag'
@@ -25,14 +25,6 @@ jobs:
       uses: "WyriHaximus/github-action-next-semvers@v1.2.1"
       with:
         version: ${{ steps.previoustag.outputs.tag }}
-    - name: 'Create GitHub release'
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        gh release create "${{ steps.semvers.outputs.patch }}" \
-          --title "${{ steps.semvers.outputs.patch }}" \
-          --target "${{ github.sha }}" \
-          --generate-notes
     - name: Set up Python
       uses: actions/setup-python@v6
       with:
@@ -49,3 +41,17 @@ jobs:
         sed -i.bak 's/0.0.0-dev/${{ steps.semvers.outputs.patch }}/' ./setup.py
         python setup.py sdist bdist_wheel
         twine upload dist/*
+    - name: 'Create GitHub release'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "${{ steps.semvers.outputs.patch }}" \
+          --title "${{ steps.semvers.outputs.patch }}" \
+          --target "${{ github.sha }}" \
+          --generate-notes
+    - name: 'Trigger HA plugin manifest bump'
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh workflow run bump-ha-plugin.yml \
+          -f version="${{ steps.semvers.outputs.patch }}"
