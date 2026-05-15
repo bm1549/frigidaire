@@ -171,6 +171,28 @@ def test_get_appliances_reauths_on_non_cas_3403_failure(monkeypatch: pytest.Monk
 
 
 @responses.activate
+def test_writes_are_rate_limited_through_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: ensure the limiter is actually wrapping self._session.request.
+
+    The previous autowrap attempted to patch a non-existent self._session and
+    silently failed, leaving rate limiting disabled in production.
+    """
+    sleeps: list[float] = []
+    monkeypatch.setattr("frigidaire.rate_limit.time.sleep", lambda s: sleeps.append(s))
+
+    client = make_authenticated_client(rate_limit_min_interval=1.5, rate_limit_jitter=0.0)
+    command_url = f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command"
+    responses.add(responses.PUT, command_url, json={}, status=200)
+
+    appliance = make_appliance()
+    client.execute_action(appliance, Action.set_power(Power.ON))
+    client.execute_action(appliance, Action.set_power(Power.OFF))
+
+    # First PUT establishes the next-ok-at; second PUT must sleep ~1.5s
+    assert any(abs(s - 1.5) < 0.05 for s in sleeps), f"expected a ~1.5s sleep, got {sleeps}"
+
+
+@responses.activate
 def test_execute_action_cas_3403_propagates_without_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
     client = make_authenticated_client()
     reauth_called = []

@@ -8,7 +8,14 @@ import pytest
 import responses
 
 from frigidaire import Frigidaire, FrigidaireException
-from tests.conftest import FAKE_SESSION_SECRET, GLOBAL_URL, IDENTITY_DOMAIN, REGIONAL_URL, USERS_CURRENT_URL
+from tests.conftest import (
+    FAKE_SESSION_SECRET,
+    GLOBAL_URL,
+    IDENTITY_DOMAIN,
+    NO_RATE_LIMIT,
+    REGIONAL_URL,
+    USERS_CURRENT_URL,
+)
 
 
 def _stub_full_auth() -> None:
@@ -60,7 +67,7 @@ def _stub_full_auth() -> None:
 @responses.activate
 def test_full_authenticate_happy_path() -> None:
     _stub_full_auth()
-    client = Frigidaire(username="user", password="pass")
+    client = Frigidaire(username="user", password="pass", **NO_RATE_LIMIT)
     assert client.session_key == "FINAL-ACCESS-TOKEN"
     assert client.regional_base_url == REGIONAL_URL
 
@@ -77,7 +84,7 @@ def test_authenticate_raises_when_session_info_missing() -> None:
     )
 
     with pytest.raises(FrigidaireException, match="sessionInfo was not in response"):
-        Frigidaire(username="user", password="pass")
+        Frigidaire(username="user", password="pass", **NO_RATE_LIMIT)
 
 
 @responses.activate
@@ -91,14 +98,16 @@ def test_authenticate_raises_when_final_token_missing() -> None:
     )
 
     with pytest.raises(FrigidaireException, match="accessToken was not in response"):
-        Frigidaire(username="user", password="pass")
+        Frigidaire(username="user", password="pass", **NO_RATE_LIMIT)
 
 
 @responses.activate
 def test_existing_session_key_validated_with_test_connection() -> None:
     """When given a session_key + regional_base_url, init verifies via /users/current only."""
     responses.add(responses.GET, USERS_CURRENT_URL, json={"id": "user-id"}, status=200)
-    client = Frigidaire(username="u", password="p", session_key="EXISTING-KEY", regional_base_url=REGIONAL_URL)
+    client = Frigidaire(
+        username="u", password="p", session_key="EXISTING-KEY", regional_base_url=REGIONAL_URL, **NO_RATE_LIMIT
+    )
     assert client.session_key == "EXISTING-KEY"
     assert len(responses.calls) == 1  # only test_connection fired
 
@@ -109,5 +118,7 @@ def test_invalid_existing_session_key_triggers_full_reauth() -> None:
     responses.add(responses.GET, USERS_CURRENT_URL, json={"error": "expired"}, status=401)
     _stub_full_auth()
 
-    client = Frigidaire(username="u", password="p", session_key="EXPIRED", regional_base_url=REGIONAL_URL)
+    client = Frigidaire(
+        username="u", password="p", session_key="EXPIRED", regional_base_url=REGIONAL_URL, **NO_RATE_LIMIT
+    )
     assert client.session_key == "FINAL-ACCESS-TOKEN"

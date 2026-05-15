@@ -50,7 +50,7 @@ def _parse_retry_after_seconds(value: str | None) -> float | None:
 def wrap_session_request(
     request_func: Callable[..., requests.Response],
     limiter: RateLimiter,
-    rl_methods: frozenset[str] | set[str] = RL_DEFAULT_METHODS,
+    rl_methods: frozenset[str] | set[str] | None = None,
     max_retry_after: float = 60.0,
     max_retries_on_429: int = 4,
     default_timeout: TimeoutType | None = 15.0,
@@ -58,9 +58,11 @@ def wrap_session_request(
     """Wrap requests.Session.request with rate limiting, 429 handling, and default timeout."""
     import time as _time
 
+    methods = rl_methods if rl_methods is not None else RL_DEFAULT_METHODS
+
     def _wrapped(method: str, url: str, **kwargs):
         m = (method or "").upper()
-        if m in rl_methods:
+        if m in methods:
             limiter.wait()
 
         if default_timeout is not None and "timeout" not in kwargs:

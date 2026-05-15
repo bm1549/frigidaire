@@ -10,7 +10,6 @@ import requests
 
 from frigidaire import Frigidaire
 from frigidaire.rate_limit import RateLimiter, wrap_session_request
-from frigidaire.rl_autowrap import enable_autowrap
 
 
 def env_or(v, k):
@@ -44,14 +43,12 @@ def _find_session(api):
 
 
 def main():
-    enable_autowrap()  # enable wrapper if the library supports it
-
     p = argparse.ArgumentParser(description="Frigidaire library smoke tests (no device writes).")
     p.add_argument("--username", help="Account username (or env FRIGIDAIRE_USERNAME)")
     p.add_argument("--password", help="Account password (or env FRIGIDAIRE_PASSWORD)")
     p.add_argument("--min-interval", type=float, default=1.5)
     p.add_argument("--jitter", type=float, default=0.0)
-    p.add_argument("--http-timeout", type=str, default="15.0")  # float or "connect,read"
+    p.add_argument("--http-timeout", type=float, default=15.0)
     args = p.parse_args()
 
     username = env_or(args.username, "FRIGIDAIRE_USERNAME")
@@ -67,7 +64,7 @@ def main():
         password=password,
         rate_limit_min_interval=args.min_interval,
         rate_limit_jitter=args.jitter,
-        http_timeout=args.http_timeout,
+        timeout=args.http_timeout,
     )
 
     # 1) List appliances (read-only)
@@ -85,7 +82,7 @@ def main():
         # Fallback: our own requests.Session() with the same limiter+timeout semantics
         sess = requests.Session()
         limiter = RateLimiter(args.min_interval, args.jitter)
-        sess.request = wrap_session_request(sess.request, limiter, default_timeout=float(args.http_timeout))
+        sess.request = wrap_session_request(sess.request, limiter, default_timeout=args.http_timeout)
 
     # 2) Default-timeout check (~15s unless overridden)
     print("\nDefault-timeout check (expect ~15s unless overridden)...")
