@@ -295,6 +295,7 @@ class Mode(str, Enum):
     AUTO = "AUTO"
     CONTINUOUS = "CONTINUOUS"
     QUIET = "QUIET"
+    SMART = "SMART"
 
 
 class FanSpeed(str, Enum):
