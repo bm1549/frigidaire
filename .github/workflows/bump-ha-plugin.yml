@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout home-assistant-frigidaire
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           repository: bm1549/home-assistant-frigidaire
           token: ${{ secrets.HA_PLUGIN_TOKEN }}
