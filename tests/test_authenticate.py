@@ -122,3 +122,55 @@ def test_invalid_existing_session_key_triggers_full_reauth() -> None:
         username="u", password="p", session_key="EXPIRED", regional_base_url=REGIONAL_URL, **NO_RATE_LIMIT
     )
     assert client.session_key == "FINAL-ACCESS-TOKEN"
+
+
+@responses.activate
+def test_authenticate_notifies_on_session_key_update() -> None:
+    """A freshly minted session key is handed to the on_session_key_update callback.
+
+    This lets a caller persist the key so it survives restarts, instead of
+    abandoning a still-valid (month-long) token and minting a new session next time.
+    """
+    _stub_full_auth()
+    updates: list[tuple[str, str | None]] = []
+
+    client = Frigidaire(
+        username="user",
+        password="pass",
+        on_session_key_update=lambda key, base_url: updates.append((key, base_url)),
+        **NO_RATE_LIMIT,
+    )
+
+    assert client.session_key == "FINAL-ACCESS-TOKEN"
+    assert updates == [("FINAL-ACCESS-TOKEN", REGIONAL_URL)]
+
+
+@responses.activate
+def test_valid_existing_session_key_does_not_notify() -> None:
+    """Reusing a still-valid key mints nothing, so the callback must not fire."""
+    responses.add(responses.GET, USERS_CURRENT_URL, json={"id": "user-id"}, status=200)
+    updates: list[tuple[str, str | None]] = []
+
+    Frigidaire(
+        username="u",
+        password="p",
+        session_key="EXISTING-KEY",
+        regional_base_url=REGIONAL_URL,
+        on_session_key_update=lambda key, base_url: updates.append((key, base_url)),
+        **NO_RATE_LIMIT,
+    )
+
+    assert updates == []
+
+
+@responses.activate
+def test_session_key_callback_failure_does_not_break_auth() -> None:
+    """A raising callback must not sink authentication — persistence is best-effort."""
+    _stub_full_auth()
+
+    def boom(_key: str, _base_url: str | None) -> None:
+        raise RuntimeError("disk full")
+
+    client = Frigidaire(username="user", password="pass", on_session_key_update=boom, **NO_RATE_LIMIT)
+
+    assert client.session_key == "FINAL-ACCESS-TOKEN"

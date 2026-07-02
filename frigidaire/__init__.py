@@ -400,6 +400,7 @@ class Frigidaire:
         rate_limit_scope_key: str | None = None,
         max_retries_on_429: int = 4,
         max_retry_after: float = 60.0,
+        on_session_key_update: Callable[[str, str | None], None] | None = None,
     ):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
@@ -418,12 +419,17 @@ class Frigidaire:
         :param rate_limit_scope_key: Key for sharing a limiter across instances (default: username).
         :param max_retries_on_429: Max retries on 429/423 before giving up (default 4).
         :param max_retry_after: Cap on the server's Retry-After header in seconds (default 60.0).
+        :param on_session_key_update: Optional callback invoked with (session_key, regional_base_url)
+                            whenever a new session key is minted. Lets callers persist the key so it
+                            survives restarts instead of abandoning a still-valid token and minting a
+                            new server-side session (which Electrolux caps via cas_3403).
         """
         self.username = username
         self.password = password
         self.session_key: str | None = session_key
         self.regional_base_url = regional_base_url
         self.country_code = country_code
+        self._on_session_key_update = on_session_key_update
 
         self._session = requests.Session()
         scope = rate_limit_scope_key or username
@@ -612,6 +618,19 @@ class Frigidaire:
 
         logging.debug("Authentication successful, storing new session key")
         self.session_key = access_token
+        self._emit_session_key_update()
+
+    def _emit_session_key_update(self) -> None:
+        """Notify the caller of a freshly minted session key so it can be persisted.
+
+        Best-effort: a failing callback must never sink authentication.
+        """
+        if self._on_session_key_update is None or self.session_key is None:
+            return
+        try:
+            self._on_session_key_update(self.session_key, self.regional_base_url)
+        except Exception:
+            logging.exception("on_session_key_update callback failed")
 
     def re_authenticate(self) -> None:
         """
@@ -630,15 +649,30 @@ class Frigidaire:
         return cast(list[dict], self.get_request(url, path, headers))
 
     def _with_reauth(self, fn: Callable[[], T]) -> T:
-        """Run fn(); if it fails for a non-cas_3403 reason, re-authenticate and retry once."""
+        """Run fn(), retrying on the existing session before falling back to re-authentication.
+
+        Re-authenticating mints a new server-side session, and Electrolux caps active
+        sessions (cas_3403). Because tokens stay valid for a long time, an abandoned
+        session lingers and these accumulate until the account is locked out. A transient
+        failure (timeout, 5xx) does not mean our session is invalid, so we first retry the
+        same request on the existing session and only re-authenticate if that also fails.
+        cas_3403 is never retried or re-authenticated — that only makes things worse.
+        """
         try:
             return fn()
         except FrigidaireException as e:
-            # Re-authenticating on a 429 makes things worse
             if "cas_3403" in traceback.format_exc():
                 logging.debug("Rate limited - try again later")
                 raise e
-            logging.debug("Request failed - attempting to re-authenticate")
+            logging.debug("Request failed - retrying once on the existing session")
+
+        try:
+            return fn()
+        except FrigidaireException as e:
+            if "cas_3403" in traceback.format_exc():
+                logging.debug("Rate limited - try again later")
+                raise e
+            logging.debug("Retry failed - attempting to re-authenticate")
             self.re_authenticate()
             return fn()
 

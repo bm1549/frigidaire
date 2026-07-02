@@ -149,8 +149,29 @@ def test_429_with_cas_3403_does_not_reauth(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @responses.activate
-def test_get_appliances_reauths_on_non_cas_3403_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A generic failure (not cas_3403) triggers re-authentication and one retry."""
+def test_transient_failure_retries_on_existing_session_without_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A one-off failure retries on the existing session and must NOT re-authenticate.
+
+    Re-authenticating mints a new server-side session; Electrolux caps active
+    sessions (cas_3403), and month-long tokens make abandoned sessions accumulate.
+    A transient blip doesn't mean our session is invalid, so we retry first.
+    """
+    client = make_authenticated_client()
+    reauth_called: list[bool] = []
+    monkeypatch.setattr(client, "re_authenticate", lambda: reauth_called.append(True))
+
+    # First call fails with a generic 500; retry on the same session succeeds.
+    responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
+    responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
+
+    appliances = client.get_appliances()
+    assert appliances == []
+    assert reauth_called == []
+
+
+@responses.activate
+def test_persistent_failure_reauths_after_retry_also_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only when the retry also fails do we conclude the session is bad and re-authenticate."""
     client = make_authenticated_client()
 
     reauth_called: list[bool] = []
@@ -161,7 +182,8 @@ def test_get_appliances_reauths_on_non_cas_3403_failure(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(client, "re_authenticate", fake_reauth)
 
-    # First call fails with a generic 500; second succeeds
+    # First call and the retry both fail; only then re-auth, and the third call succeeds.
+    responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
 
