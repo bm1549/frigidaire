@@ -5,7 +5,6 @@ import json
 import logging
 import random
 import time
-import traceback
 from collections.abc import Callable
 from enum import Enum
 from typing import NoReturn, Optional, TypeVar, cast
@@ -66,7 +65,10 @@ def _redact_payload(payload: str) -> str:
 
 
 class FrigidaireException(Exception):
-    pass
+    def __init__(self, message: str, *, status_code: int | None = None, error_code: str | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+        self.error_code = error_code
 
 
 # Maps known Electrolux internal platform codenames to destination types.
@@ -400,6 +402,8 @@ class Frigidaire:
         rate_limit_scope_key: str | None = None,
         max_retries_on_429: int = 4,
         max_retry_after: float = 60.0,
+        session_max_retries: int = 2,
+        session_retry_backoff: float = 0.0,
         on_session_key_update: Callable[[str, str | None], None] | None = None,
     ):
         """
@@ -419,6 +423,12 @@ class Frigidaire:
         :param rate_limit_scope_key: Key for sharing a limiter across instances (default: username).
         :param max_retries_on_429: Max retries on 429/423 before giving up (default 4).
         :param max_retry_after: Cap on the server's Retry-After header in seconds (default 60.0).
+        :param session_max_retries: How many times to re-run a failed operation before giving up
+                            (default 2): the first extra attempt retries on the existing session,
+                            the last re-authenticates first. The session cap (cas_3403) is never
+                            retried. 0 disables session retries entirely.
+        :param session_retry_backoff: Seconds to sleep before each session retry, scaled by attempt
+                            number (default 0.0 = no delay).
         :param on_session_key_update: Optional callback invoked with (session_key, regional_base_url)
                             whenever a new session key is minted. Lets callers persist the key so it
                             survives restarts instead of abandoning a still-valid token and minting a
@@ -429,6 +439,8 @@ class Frigidaire:
         self.session_key: str | None = session_key
         self.regional_base_url = regional_base_url
         self.country_code = country_code
+        self._session_max_retries = session_max_retries
+        self._session_retry_backoff = session_retry_backoff
         self._on_session_key_update = on_session_key_update
 
         self._session = requests.Session()
@@ -648,6 +660,11 @@ class Frigidaire:
     def _get_list_of_dicts(self, url: str | None, path: str, headers: dict[str, str]) -> list[dict]:
         return cast(list[dict], self.get_request(url, path, headers))
 
+    @staticmethod
+    def _is_session_cap(e: FrigidaireException) -> bool:
+        """Whether an exception is the Electrolux active-session cap (cas_3403)."""
+        return e.error_code == "cas_3403"
+
     def _with_reauth(self, fn: Callable[[], T]) -> T:
         """Run fn(), retrying on the existing session before falling back to re-authentication.
 
@@ -657,24 +674,28 @@ class Frigidaire:
         failure (timeout, 5xx) does not mean our session is invalid, so we first retry the
         same request on the existing session and only re-authenticate if that also fails.
         cas_3403 is never retried or re-authenticated — that only makes things worse.
-        """
-        try:
-            return fn()
-        except FrigidaireException as e:
-            if "cas_3403" in traceback.format_exc():
-                logging.debug("Rate limited - try again later")
-                raise e
-            logging.debug("Request failed - retrying once on the existing session")
 
-        try:
-            return fn()
-        except FrigidaireException as e:
-            if "cas_3403" in traceback.format_exc():
-                logging.debug("Rate limited - try again later")
-                raise e
-            logging.debug("Retry failed - attempting to re-authenticate")
-            self.re_authenticate()
-            return fn()
+        The number of retries and any delay between them are configurable via
+        ``session_max_retries`` and ``session_retry_backoff``.
+        """
+        last_attempt = self._session_max_retries
+        for attempt in range(last_attempt + 1):
+            try:
+                return fn()
+            except FrigidaireException as e:
+                if self._is_session_cap(e):
+                    logging.debug("Rate limited - try again later")
+                    raise
+                if attempt == last_attempt:
+                    raise
+                if attempt == last_attempt - 1:
+                    logging.debug("Retry failed - attempting to re-authenticate")
+                    self.re_authenticate()
+                else:
+                    logging.debug("Request failed - retrying on the existing session")
+                if self._session_retry_backoff:
+                    time.sleep(self._session_retry_backoff * (attempt + 1))
+        raise AssertionError("unreachable")  # pragma: no cover
 
     def _fetch_raw_appliances(self) -> list[dict]:
         return self._get_list_of_dicts(
@@ -737,7 +758,20 @@ class Frigidaire:
         :return: The data in the response, if the response was successful and there is data present
         """
         if response.status_code != 200:
-            raise FrigidaireException(f"Request failed with status {response.status_code}: {response.content!r}")
+            # Extract the platform error code (e.g. cas_3403) so callers can classify the
+            # failure structurally instead of scanning the traceback string.
+            error_code: str | None = None
+            try:
+                body = response.json()
+                if isinstance(body, dict):
+                    error_code = body.get("error")
+            except Exception:
+                pass
+            raise FrigidaireException(
+                f"Request failed with status {response.status_code}: {response.content!r}",
+                status_code=response.status_code,
+                error_code=error_code,
+            )
 
         try:
             if response.headers.get("Content-Encoding") == "gzip":
@@ -772,7 +806,13 @@ class Frigidaire:
             f"{method} {fullpath}\nheaders={safe_headers}\npayload={safe_payload}\n"
         )
         logging.warning(error_str)
-        raise FrigidaireException(error_str) from e
+        # Preserve structured error info from the wrapped exception so re-auth logic
+        # downstream can still recognise the failure class (e.g. the cas_3403 session cap).
+        raise FrigidaireException(
+            error_str,
+            status_code=getattr(e, "status_code", None),
+            error_code=getattr(e, "error_code", None),
+        ) from e
 
     def get_request(self, url: str | None, path: str, headers: dict[str, str]) -> dict | list:
         """

@@ -52,3 +52,38 @@ def test_invalid_json_body_raises() -> None:
     r.json.side_effect = ValueError("invalid")
     with pytest.raises(FrigidaireException, match="unexpected response"):
         Frigidaire.parse_response(r)
+
+
+def test_error_response_carries_structured_status_and_code() -> None:
+    """The session-cap error must be identifiable without scanning the traceback string."""
+    r = _resp(429, b'{"error":"cas_3403"}', json_data={"error": "cas_3403"})
+    with pytest.raises(FrigidaireException) as exc_info:
+        Frigidaire.parse_response(r)
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.error_code == "cas_3403"
+
+
+def test_error_response_without_error_field_has_none_code() -> None:
+    r = _resp(500, b'{"detail":"boom"}', json_data={"detail": "boom"})
+    with pytest.raises(FrigidaireException) as exc_info:
+        Frigidaire.parse_response(r)
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.error_code is None
+
+
+def test_error_response_with_unparseable_body_still_sets_status() -> None:
+    r = MagicMock(status_code=503, content=b"<html>gateway</html>", headers={})
+    r.json.side_effect = ValueError("invalid")
+    with pytest.raises(FrigidaireException) as exc_info:
+        Frigidaire.parse_response(r)
+    assert exc_info.value.status_code == 503
+    assert exc_info.value.error_code is None
+
+
+def test_handle_request_exception_propagates_structured_fields() -> None:
+    """The outer exception raised by request wrappers must carry the cause's status/error code."""
+    cause = FrigidaireException("orig", status_code=429, error_code="cas_3403")
+    with pytest.raises(FrigidaireException) as exc_info:
+        Frigidaire.handle_request_exception(cause, "GET", "http://x/y", {}, "")
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.error_code == "cas_3403"

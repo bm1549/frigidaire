@@ -215,6 +215,37 @@ def test_writes_are_rate_limited_through_session(monkeypatch: pytest.MonkeyPatch
 
 
 @responses.activate
+def test_session_max_retries_zero_makes_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With session retries disabled, a failure is raised immediately — no retry, no re-auth."""
+    client = make_authenticated_client(session_max_retries=0)
+    reauth_called: list[bool] = []
+    monkeypatch.setattr(client, "re_authenticate", lambda: reauth_called.append(True))
+
+    responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
+    with pytest.raises(FrigidaireException):
+        client.get_appliances()
+    assert reauth_called == []
+    appliance_calls = [c for c in responses.calls if c.request.url.startswith(APPLIANCES_URL)]
+    assert len(appliance_calls) == 1  # single attempt, no retry
+
+
+@responses.activate
+def test_session_retry_backoff_sleeps_between_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A configured backoff sleeps before retrying on the existing session."""
+    sleeps: list[float] = []
+    monkeypatch.setattr("frigidaire.time.sleep", lambda s: sleeps.append(s))
+
+    client = make_authenticated_client(session_retry_backoff=0.5)
+    monkeypatch.setattr(client, "re_authenticate", lambda: None)
+
+    responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
+    responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
+
+    assert client.get_appliances() == []
+    assert any(abs(s - 0.5) < 0.01 for s in sleeps), f"expected a ~0.5s backoff sleep, got {sleeps}"
+
+
+@responses.activate
 def test_execute_action_cas_3403_propagates_without_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
     client = make_authenticated_client()
     reauth_called = []
