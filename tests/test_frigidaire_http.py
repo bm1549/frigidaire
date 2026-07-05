@@ -149,8 +149,29 @@ def test_429_with_cas_3403_does_not_reauth(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 @responses.activate
-def test_get_appliances_reauths_on_non_cas_3403_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A generic failure (not cas_3403) triggers re-authentication and one retry."""
+def test_transient_failure_retries_on_existing_session_without_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A one-off failure retries on the existing session and must NOT re-authenticate.
+
+    Re-authenticating mints a new server-side session; Electrolux caps active
+    sessions (cas_3403), and month-long tokens make abandoned sessions accumulate.
+    A transient blip doesn't mean our session is invalid, so we retry first.
+    """
+    client = make_authenticated_client()
+    reauth_called: list[bool] = []
+    monkeypatch.setattr(client, "re_authenticate", lambda: reauth_called.append(True))
+
+    # First call fails with a generic 500; retry on the same session succeeds.
+    responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
+    responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
+
+    appliances = client.get_appliances()
+    assert appliances == []
+    assert reauth_called == []
+
+
+@responses.activate
+def test_persistent_failure_reauths_after_retry_also_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only when the retry also fails do we conclude the session is bad and re-authenticate."""
     client = make_authenticated_client()
 
     reauth_called: list[bool] = []
@@ -161,7 +182,8 @@ def test_get_appliances_reauths_on_non_cas_3403_failure(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(client, "re_authenticate", fake_reauth)
 
-    # First call fails with a generic 500; second succeeds
+    # First call and the retry both fail; only then re-auth, and the third call succeeds.
+    responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
 
@@ -190,6 +212,37 @@ def test_writes_are_rate_limited_through_session(monkeypatch: pytest.MonkeyPatch
 
     # First PUT establishes the next-ok-at; second PUT must sleep ~1.5s
     assert any(abs(s - 1.5) < 0.05 for s in sleeps), f"expected a ~1.5s sleep, got {sleeps}"
+
+
+@responses.activate
+def test_session_max_retries_zero_makes_single_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With session retries disabled, a failure is raised immediately — no retry, no re-auth."""
+    client = make_authenticated_client(session_max_retries=0)
+    reauth_called: list[bool] = []
+    monkeypatch.setattr(client, "re_authenticate", lambda: reauth_called.append(True))
+
+    responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
+    with pytest.raises(FrigidaireException):
+        client.get_appliances()
+    assert reauth_called == []
+    appliance_calls = [c for c in responses.calls if c.request.url.startswith(APPLIANCES_URL)]
+    assert len(appliance_calls) == 1  # single attempt, no retry
+
+
+@responses.activate
+def test_session_retry_backoff_sleeps_between_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A configured backoff sleeps before retrying on the existing session."""
+    sleeps: list[float] = []
+    monkeypatch.setattr("frigidaire.time.sleep", lambda s: sleeps.append(s))
+
+    client = make_authenticated_client(session_retry_backoff=0.5)
+    monkeypatch.setattr(client, "re_authenticate", lambda: None)
+
+    responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
+    responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
+
+    assert client.get_appliances() == []
+    assert any(abs(s - 0.5) < 0.01 for s in sleeps), f"expected a ~0.5s backoff sleep, got {sleeps}"
 
 
 @responses.activate
