@@ -50,6 +50,13 @@ def test_appliance_infers_dh_from_humidity_keys(caplog: pytest.LogCaptureFixture
     assert "inferred DEHUMIDIFIER" in caplog.text
 
 
+def test_appliance_infers_dh_from_water_tank_full_key(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.WARNING)
+    appliance = Appliance(_raw("UnknownCodename", reported={"waterTankFull": "YES"}))
+    assert appliance.destination is Destination.DEHUMIDIFIER
+    assert "inferred DEHUMIDIFIER" in caplog.text
+
+
 def test_appliance_infers_ac_from_temperature_keys(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.WARNING)
     appliance = Appliance(_raw("UnknownCodename", reported={"targetTemperatureF": 72, "ambientTemperatureF": 70}))

@@ -119,7 +119,7 @@ _AC_PROPERTY_KEYS = {
     "ambientTemperatureF",
     "temperatureRepresentation",
 }
-_DH_PROPERTY_KEYS = {"targetHumidity", "sensorHumidity", "waterBucketLevel"}
+_DH_PROPERTY_KEYS = {"targetHumidity", "sensorHumidity", "waterBucketLevel", "waterTankFull"}
 
 
 class Setting(str, Enum):
@@ -183,6 +183,7 @@ class Detail(str, Enum):
     STOP_TIME = "stopTime"
     TARGET_HUMIDITY = "targetHumidity"
     WATER_BUCKET_LEVEL = "waterBucketLevel"
+    WATER_TANK_FULL = "waterTankFull"
 
 
 class Appliance:
