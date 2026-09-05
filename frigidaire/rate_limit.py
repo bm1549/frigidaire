@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import logging
 import random
 import threading
 import time
@@ -9,6 +10,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import requests
+
+_LOGGER = logging.getLogger(__name__)
 
 RL_DEFAULT_METHODS: frozenset[str] = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 TimeoutType = float | tuple[float, float]  # requests supports float or (connect, read)
@@ -78,7 +81,28 @@ def wrap_session_request(
                 delay = min(float(max_retry_after), retry_after or backoff)
                 limiter.cool_down(delay)
                 if retries >= max_retries_on_429:
+                    _LOGGER.warning(
+                        "Frigidaire API returned HTTP %s for %s %s; giving up after %d %s",
+                        status,
+                        m,
+                        url,
+                        retries,
+                        "retry" if retries == 1 else "retries",
+                    )
                     return resp
+                # Warn once so throttling is visible even when the retry succeeds; keep the
+                # rest at DEBUG so sustained throttling doesn't flood the log every poll.
+                level = logging.WARNING if retries == 0 else logging.DEBUG
+                _LOGGER.log(
+                    level,
+                    "Frigidaire API returned HTTP %s for %s %s; retrying in %.1fs (retry %d of %d)",
+                    status,
+                    m,
+                    url,
+                    delay,
+                    retries + 1,
+                    max_retries_on_429,
+                )
                 _time.sleep(delay)
                 retries += 1
                 backoff = min(float(max_retry_after), backoff * 2.0)

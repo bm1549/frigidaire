@@ -22,12 +22,13 @@ jobs:
         run: |
           CURRENT=$(grep -oP '"frigidaire==\K[^"]+' custom_components/frigidaire/manifest.json)
           echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
-      - name: Bump frigidaire pin in manifest
+      - name: Bump frigidaire pin in manifest and test requirements
         env:
           VERSION: ${{ inputs.version }}
         run: |
           sed -i 's/"frigidaire==[^"]*"/"frigidaire=='"$VERSION"'"/' \
             custom_components/frigidaire/manifest.json
+          sed -i 's/^frigidaire==.*$/frigidaire=='"$VERSION"'/' requirements_test.txt
       - name: Open PR in home-assistant-frigidaire
         uses: peter-evans/create-pull-request@v8
         with:
@@ -42,4 +43,4 @@ jobs:
             - Diff: https://github.com/bm1549/frigidaire/compare/${{ steps.current.outputs.version }}...${{ inputs.version }}
             - PyPI: https://pypi.org/project/frigidaire/${{ inputs.version }}/
 
-            Updates `custom_components/frigidaire/manifest.json`.
+            Updates `custom_components/frigidaire/manifest.json` and `requirements_test.txt`.

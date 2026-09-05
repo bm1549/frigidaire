@@ -32,7 +32,8 @@ All tunables are optional kwargs on `Frigidaire(...)`:
 
 ```python
 api = Frigidaire(
-    "username", "password",
+    "username",
+    "password",
     timeout=20.0,
     rate_limit_min_interval=1.5,
     rate_limit_jitter=0.3,
