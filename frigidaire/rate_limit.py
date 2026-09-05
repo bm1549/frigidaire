@@ -82,14 +82,19 @@ def wrap_session_request(
                 limiter.cool_down(delay)
                 if retries >= max_retries_on_429:
                     _LOGGER.warning(
-                        "Frigidaire API returned HTTP %s for %s %s; giving up after %d retries",
+                        "Frigidaire API returned HTTP %s for %s %s; giving up after %d %s",
                         status,
                         m,
                         url,
                         retries,
+                        "retry" if retries == 1 else "retries",
                     )
                     return resp
-                _LOGGER.warning(
+                # Warn once so throttling is visible even when the retry succeeds; keep the
+                # rest at DEBUG so sustained throttling doesn't flood the log every poll.
+                level = logging.WARNING if retries == 0 else logging.DEBUG
+                _LOGGER.log(
+                    level,
                     "Frigidaire API returned HTTP %s for %s %s; retrying in %.1fs (retry %d of %d)",
                     status,
                     m,

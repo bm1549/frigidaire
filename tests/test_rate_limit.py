@@ -183,8 +183,24 @@ def test_429_give_up_is_logged_as_warning(clock: FakeClock, caplog: pytest.LogCa
     with caplog.at_level("WARNING", logger="frigidaire.rate_limit"):
         assert wrapped("PUT", "https://api.example/command").status_code == 429
 
-    assert "giving up after 1 retries" in caplog.text
+    assert "giving up after 1 retry" in caplog.text
     assert caplog.text.count("HTTP 429") == 2
+    assert caplog.records[-1].name == "frigidaire.rate_limit"
+
+
+def test_later_retries_are_logged_at_debug(clock: FakeClock, caplog: pytest.LogCaptureFixture) -> None:
+    """Only the first retry warns; sustained throttling stays out of the user's log."""
+    request = MagicMock(
+        side_effect=[_ok_response(429, "1"), _ok_response(429, "1"), _ok_response(429, "1"), _ok_response(200)]
+    )
+    wrapped = wrap_session_request(request, RateLimiter(min_interval=0.0), max_retries_on_429=4)
+
+    with caplog.at_level("DEBUG", logger="frigidaire.rate_limit"):
+        assert wrapped("GET", "https://api.example/appliances").status_code == 200
+
+    records = [r for r in caplog.records if r.name == "frigidaire.rate_limit"]
+    assert [r.levelname for r in records] == ["WARNING", "DEBUG", "DEBUG"]
+    assert "giving up" not in caplog.text
 
 
 def test_successful_request_logs_nothing(clock: FakeClock, caplog: pytest.LogCaptureFixture) -> None:
