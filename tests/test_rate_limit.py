@@ -157,3 +157,41 @@ def test_retry_after_capped_by_max_retry_after(clock: FakeClock) -> None:
 
     wrapped("GET", "https://example.com")
     assert clock.sleep_calls == [pytest.approx(5.0)]
+
+
+# --- logging ---
+
+
+def test_429_retry_is_logged_as_warning(clock: FakeClock, caplog: pytest.LogCaptureFixture) -> None:
+    request = MagicMock(side_effect=[_ok_response(429, "2"), _ok_response(200)])
+    wrapped = wrap_session_request(request, RateLimiter(min_interval=0.0), max_retries_on_429=4)
+
+    with caplog.at_level("WARNING", logger="frigidaire.rate_limit"):
+        assert wrapped("GET", "https://api.example/appliances").status_code == 200
+
+    assert len(caplog.records) == 1
+    assert caplog.records[0].name == "frigidaire.rate_limit"
+    assert "HTTP 429" in caplog.text
+    assert "GET https://api.example/appliances" in caplog.text
+    assert "retrying in 2.0s" in caplog.text
+
+
+def test_429_give_up_is_logged_as_warning(clock: FakeClock, caplog: pytest.LogCaptureFixture) -> None:
+    request = MagicMock(side_effect=[_ok_response(429), _ok_response(429)])
+    wrapped = wrap_session_request(request, RateLimiter(min_interval=0.0), max_retries_on_429=1)
+
+    with caplog.at_level("WARNING", logger="frigidaire.rate_limit"):
+        assert wrapped("PUT", "https://api.example/command").status_code == 429
+
+    assert "giving up after 1 retries" in caplog.text
+    assert caplog.text.count("HTTP 429") == 2
+
+
+def test_successful_request_logs_nothing(clock: FakeClock, caplog: pytest.LogCaptureFixture) -> None:
+    request = MagicMock(return_value=_ok_response(200))
+    wrapped = wrap_session_request(request, RateLimiter(min_interval=0.0))
+
+    with caplog.at_level("WARNING", logger="frigidaire.rate_limit"):
+        wrapped("GET", "https://api.example/appliances")
+
+    assert caplog.text == ""
