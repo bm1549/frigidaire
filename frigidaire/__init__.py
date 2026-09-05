@@ -119,7 +119,9 @@ _AC_PROPERTY_KEYS = {
     "ambientTemperatureF",
     "temperatureRepresentation",
 }
-_DH_PROPERTY_KEYS = {"targetHumidity", "sensorHumidity", "waterBucketLevel", "waterTankFull"}
+# Note: "sensorHumidity" is deliberately absent. It is not DH-exclusive — Telica portable
+# ACs report a room humidity reading, so treating it as a DH marker misidentifies them.
+_DH_PROPERTY_KEYS = {"targetHumidity", "waterBucketLevel", "waterTankFull"}
 
 
 class Setting(str, Enum):
@@ -163,7 +165,12 @@ class Detail(str, Enum):
     FAN_SPEED_STATE = "fanSpeedState"
     FILTER_STATE = "filterState"
     MODE = "mode"
+    # The mode the appliance reports it is *actually* running, which can differ from the
+    # requested MODE — e.g. an ECO/AUTO unit reports "cool" or "fanOnly" as it cycles.
+    MODE_STATE = "modeState"
     NETWORK_INTERFACE = "networkInterface"
+    # Room humidity reading. Reported by dehumidifiers and by some ACs (e.g. Telica).
+    SENSOR_HUMIDITY = "sensorHumidity"
     UI_LOCK_MODE = "uiLockMode"
     SLEEP_MODE = "sleepMode"
     VERTICAL_SWING = "verticalSwing"
@@ -175,10 +182,14 @@ class Detail(str, Enum):
     TARGET_TEMPERATURE_F = "targetTemperatureF"
     TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
 
+    # Air quality, on models with a particulate sensor. Units are µg/m³.
+    PM1 = "pm1"
+    PM10 = "pm10"
+    PM25 = "pm25"
+
     # Humidifier
     DISPLAY_LIGHT = "displayLight"
     CLEAN_AIR_MODE = "cleanAirMode"
-    SENSOR_HUMIDITY = "sensorHumidity"
     START_TIME = "startTime"
     STOP_TIME = "stopTime"
     TARGET_HUMIDITY = "targetHumidity"
@@ -199,9 +210,10 @@ class Appliance:
         except ValueError:
             pass
 
-        # Check DH first: humidity/water-bucket keys are DH-exclusive, while the "AC" keys
-        # (ambient temperature, temperature representation) are also reported by
-        # dehumidifiers that display room temp.
+        # Check DH first: target-humidity/water-bucket keys are DH-exclusive, while the "AC"
+        # keys (ambient temperature, temperature representation) are also reported by
+        # dehumidifiers that display room temp. Note that a humidity *reading*
+        # ("sensorHumidity") is not a DH marker — some ACs report one too.
         reported_keys = set(args.get("properties", {}).get("reported", {}).keys())
         if reported_keys & _DH_PROPERTY_KEYS:
             logging.warning(
@@ -718,6 +730,26 @@ class Frigidaire:
 
         return self._with_reauth(fetch)
 
+    def get_appliance_raw(self, appliance: Appliance) -> dict:
+        """
+        Uses the Frigidaire API to fetch the complete raw record for a given appliance.
+        Will authenticate if the request fails
+
+        Unlike get_appliance_details(), this keeps the keys that live alongside
+        "properties" — notably "connectionState" and "status" — which callers need in order
+        to tell a genuinely offline appliance from stale reported values.
+
+        :param appliance: The appliance to request from the API
+        :return: The full raw appliance record
+        """
+        logging.debug(f"Getting raw appliance record for appliance {appliance.nickname}")
+        raw_appliances = self._with_reauth(self._fetch_raw_appliances)
+
+        for raw_appliance in raw_appliances:
+            if raw_appliance["applianceId"] == appliance.appliance_id:
+                return raw_appliance
+        raise FrigidaireException(f"Appliance {appliance.nickname} not found in list of appliances")
+
     def get_appliance_details(self, appliance: Appliance) -> dict:
         """
         Uses the Frigidaire API to fetch details for a given appliance
@@ -726,12 +758,7 @@ class Frigidaire:
         :return: The details for the passed in appliance
         """
         logging.debug(f"Getting appliance details for appliance {appliance.nickname}")
-        raw_appliances = self._with_reauth(self._fetch_raw_appliances)
-
-        for raw_appliance in raw_appliances:
-            if raw_appliance["applianceId"] == appliance.appliance_id:
-                return raw_appliance["properties"]["reported"]
-        raise FrigidaireException(f"Appliance {appliance.nickname} not found in list of appliances")
+        return self.get_appliance_raw(appliance)["properties"]["reported"]
 
     def execute_action(self, appliance: Appliance, action: list[Component]) -> None:
         """

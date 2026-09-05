@@ -90,6 +90,50 @@ def test_get_appliance_details_raises_when_not_found() -> None:
 
 
 @responses.activate
+def test_get_appliance_raw_keeps_keys_outside_properties() -> None:
+    """connectionState lives beside `properties`, so get_appliance_details() cannot see it."""
+    client = make_authenticated_client()
+    raw = {
+        "applianceId": "AC1",
+        "applianceData": {"modelName": "AC", "applianceName": "Bedroom"},
+        "properties": {"reported": {"targetTemperatureF": 72, "mode": "COOL"}},
+        "status": "enabled",
+        "connectionState": "Connected",
+    }
+    responses.add(responses.GET, APPLIANCES_URL, json=[raw], status=200)
+
+    assert client.get_appliance_raw(make_appliance(nickname="Bedroom")) == raw
+
+
+@responses.activate
+def test_get_appliance_details_still_returns_only_reported() -> None:
+    """get_appliance_raw() must not change what existing get_appliance_details() callers see."""
+    client = make_authenticated_client()
+    responses.add(
+        responses.GET,
+        APPLIANCES_URL,
+        json=[
+            {
+                "applianceId": "AC1",
+                "applianceData": {"modelName": "AC", "applianceName": "Bedroom"},
+                "properties": {"reported": {"mode": "COOL"}, "desired": {"mode": "DRY"}},
+                "connectionState": "Connected",
+            },
+        ],
+        status=200,
+    )
+    assert client.get_appliance_details(make_appliance(nickname="Bedroom")) == {"mode": "COOL"}
+
+
+@responses.activate
+def test_get_appliance_raw_raises_when_not_found() -> None:
+    client = make_authenticated_client()
+    responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
+    with pytest.raises(FrigidaireException, match="not found"):
+        client.get_appliance_raw(make_appliance(appliance_id="MISSING"))
+
+
+@responses.activate
 def test_execute_action_puts_each_component_separately() -> None:
     """Action.set_temperature returns 2 components; each must be a separate PUT."""
     client = make_authenticated_client()

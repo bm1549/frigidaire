@@ -64,6 +64,32 @@ def test_appliance_infers_ac_from_temperature_keys(caplog: pytest.LogCaptureFixt
     assert "inferred AIR_CONDITIONER" in caplog.text
 
 
+def test_appliance_infers_ac_when_it_also_reports_a_humidity_reading(caplog: pytest.LogCaptureFixture) -> None:
+    """A humidity *reading* is not a dehumidifier marker.
+
+    Telica portable ACs report `sensorHumidity` alongside the usual temperature keys. Keying
+    DH inference off that reading misidentifies them and hands the appliance to the wrong
+    platform. Only the DH-exclusive keys (targetHumidity, waterBucketLevel, waterTankFull)
+    may drive that decision. The payload below is trimmed from a real Telica response.
+    """
+    caplog.set_level(logging.WARNING)
+    appliance = Appliance(
+        _raw(
+            "UnknownCodename",
+            reported={
+                "applianceState": "running",
+                "mode": "fanOnly",
+                "sensorHumidity": 86,
+                "ambientTemperatureF": 72,
+                "targetTemperatureF": 60,
+                "temperatureRepresentation": "fahrenheit",
+            },
+        )
+    )
+    assert appliance.destination is Destination.AIR_CONDITIONER
+    assert "inferred AIR_CONDITIONER" in caplog.text
+
+
 def test_appliance_dh_wins_when_both_keys_present(caplog: pytest.LogCaptureFixture) -> None:
     """DH check comes first because dehumidifiers also report ambient temperature."""
     caplog.set_level(logging.WARNING)
