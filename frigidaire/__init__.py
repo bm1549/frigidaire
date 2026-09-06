@@ -4,6 +4,7 @@ import gzip
 import json
 import logging
 import random
+import threading
 import time
 from collections.abc import Callable
 from enum import Enum
@@ -38,6 +39,11 @@ AUTH_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 12; sdk_gphone64_x86_64 Build
 # account share spacing — without this, a config-flow re-validation that runs
 # alongside a live entry would compete and trip cas_3403.
 _SCOPED_LIMITERS: dict[str, RateLimiter] = {}
+
+# Re-authentication is serialised per account for the same reason the limiter is
+# shared: when several threads (one per appliance in Home Assistant) fail at once,
+# only the first should mint a new session; the rest wait and reuse it.
+_SCOPED_REAUTH_LOCKS: dict[str, threading.Lock] = {}
 
 # Header names whose values are credentials; matched case-insensitively.
 _REDACT_HEADERS = frozenset({"authorization", "x-api-key"})
@@ -459,6 +465,7 @@ class Frigidaire:
         self._session = requests.Session()
         scope = rate_limit_scope_key or username
         limiter = _SCOPED_LIMITERS.setdefault(scope, RateLimiter(rate_limit_min_interval, rate_limit_jitter))
+        self._reauth_lock = _SCOPED_REAUTH_LOCKS.setdefault(scope, threading.Lock())
         self._session.request = wrap_session_request(  # type: ignore[method-assign]
             self._session.request,
             limiter,
@@ -688,11 +695,15 @@ class Frigidaire:
         same request on the existing session and only re-authenticate if that also fails.
         cas_3403 is never retried or re-authenticated — that only makes things worse.
 
+        Re-authentication is serialised by a per-account lock: a thread that failed while
+        another was minting a new session reuses that session instead of minting its own.
+
         The number of retries and any delay between them are configurable via
         ``session_max_retries`` and ``session_retry_backoff``.
         """
         last_attempt = self._session_max_retries
         for attempt in range(last_attempt + 1):
+            key_before = self.session_key
             try:
                 return fn()
             except FrigidaireException as e:
@@ -702,8 +713,12 @@ class Frigidaire:
                 if attempt == last_attempt:
                     raise
                 if attempt == last_attempt - 1:
-                    logging.debug("Retry failed - attempting to re-authenticate")
-                    self.re_authenticate()
+                    with self._reauth_lock:
+                        if self.session_key == key_before:
+                            logging.debug("Retry failed - attempting to re-authenticate")
+                            self.re_authenticate()
+                        else:
+                            logging.debug("Another request already re-authenticated - retrying with the new session")
                 else:
                     logging.debug("Request failed - retrying on the existing session")
                 if self._session_retry_backoff:
@@ -730,6 +745,19 @@ class Frigidaire:
 
         return self._with_reauth(fetch)
 
+    def get_appliances_raw(self) -> list[dict]:
+        """
+        Fetch the complete raw record of every appliance on the account in one request.
+        Will authenticate if the request fails.
+
+        Integrations that poll several appliances should call this once per cycle and
+        pick records out by "applianceId" instead of calling get_appliance_raw() or
+        get_appliance_details() per appliance, which each repeat the same request.
+        :return: The full raw appliance records
+        """
+        logging.debug("Getting raw records for every appliance")
+        return self._with_reauth(self._fetch_raw_appliances)
+
     def get_appliance_raw(self, appliance: Appliance) -> dict:
         """
         Uses the Frigidaire API to fetch the complete raw record for a given appliance.
@@ -743,9 +771,7 @@ class Frigidaire:
         :return: The full raw appliance record
         """
         logging.debug(f"Getting raw appliance record for appliance {appliance.nickname}")
-        raw_appliances = self._with_reauth(self._fetch_raw_appliances)
-
-        for raw_appliance in raw_appliances:
+        for raw_appliance in self.get_appliances_raw():
             if raw_appliance["applianceId"] == appliance.appliance_id:
                 return raw_appliance
         raise FrigidaireException(f"Appliance {appliance.nickname} not found in list of appliances")

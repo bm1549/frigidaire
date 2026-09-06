@@ -5,7 +5,7 @@ import base64
 import pytest
 import responses
 
-from frigidaire import _SCOPED_LIMITERS, Appliance, Frigidaire
+from frigidaire import _SCOPED_LIMITERS, _SCOPED_REAUTH_LOCKS, Appliance, Frigidaire
 
 # Default kwargs that disable rate limiting and 429 retries — tests should
 # spread these into Frigidaire() constructors so they run instantly.
@@ -17,9 +17,10 @@ NO_RATE_LIMIT: dict[str, object] = {
 
 
 @pytest.fixture(autouse=True)
-def _reset_scoped_limiters() -> None:
-    """Each test gets a fresh limiter scope so spacing doesn't leak across tests."""
+def _reset_scoped_state() -> None:
+    """Each test gets a fresh limiter and re-auth lock scope so neither leaks across tests."""
     _SCOPED_LIMITERS.clear()
+    _SCOPED_REAUTH_LOCKS.clear()
 
 
 GLOBAL_URL = "https://api.ocp.electrolux.one"
