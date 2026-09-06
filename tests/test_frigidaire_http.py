@@ -11,7 +11,7 @@ import pytest
 import responses
 
 from frigidaire import Action, FrigidaireException, Mode, Power
-from tests.conftest import APPLIANCES_URL, REGIONAL_URL, make_appliance, make_authenticated_client
+from tests.conftest import APPLIANCES_URL, REGIONAL_URL, make_appliance, make_authenticated_client, make_raw_appliance
 
 
 @responses.activate
@@ -304,3 +304,25 @@ def test_execute_action_cas_3403_propagates_without_reauth(monkeypatch: pytest.M
     with pytest.raises(FrigidaireException):
         client.execute_action(make_appliance(), Action.set_power(Power.ON))
     assert reauth_called == []  # critical: never re-auth on cas_3403
+
+
+@responses.activate
+def test_get_appliances_raw_returns_every_record_in_one_request() -> None:
+    client = make_authenticated_client()
+    records = [
+        make_raw_appliance(appliance_id="A1", nickname="One"),
+        make_raw_appliance(appliance_id="A2", nickname="Two"),
+    ]
+    responses.add(responses.GET, APPLIANCES_URL, json=records, status=200)
+
+    assert client.get_appliances_raw() == records
+    assert len([c for c in responses.calls if c.request.url == APPLIANCES_URL]) == 1
+
+
+@responses.activate
+def test_get_appliance_raw_uses_the_shared_fetch() -> None:
+    client = make_authenticated_client()
+    record = make_raw_appliance(appliance_id="A1", nickname="One")
+    responses.add(responses.GET, APPLIANCES_URL, json=[record], status=200)
+
+    assert client.get_appliance_raw(make_appliance(appliance_id="A1")) == record
