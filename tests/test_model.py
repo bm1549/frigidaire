@@ -191,6 +191,8 @@ def test_unknown_filter_state_still_needs_attention() -> None:
 
 def test_filter_runtime_seconds() -> None:
     assert Appliance(_raw("AC", reported={"airFilterLifeTime": 3600})).filter_runtime_seconds == 3600
+    # Husky/Eagle dehumidifiers report it under a different key (frigidaire#43 payload).
+    assert Appliance(_raw("Husky", reported={"filterRuntime": 36000})).filter_runtime_seconds == 36000
     assert Appliance(_raw("AC", reported={"airFilterLifeTime": -5})).filter_runtime_seconds is None
     assert Appliance(_raw("AC", reported={"airFilterLifeTime": "x"})).filter_runtime_seconds is None
     assert Appliance(_raw("AC", reported={})).filter_runtime_seconds is None

@@ -103,6 +103,7 @@ class Detail(str, Enum):
 
     # Common
     AIR_FILTER_LIFETIME = "airFilterLifeTime"
+    FILTER_RUNTIME = "filterRuntime"  # the same reading on Husky/Eagle dehumidifiers
     ALERTS = "alerts"
     APPLIANCE_STATE = "applianceState"
     APPLIANCE_UI_SW_VERSION = "applianceUiSwVersion"
@@ -516,8 +517,9 @@ class Appliance:
 
     @property
     def filter_runtime_seconds(self) -> float | None:
-        """Cumulative filter runtime, on models that report it."""
-        return _non_negative_float(self.get(Detail.AIR_FILTER_LIFETIME))
+        """Cumulative filter runtime, on models that report it (under either key)."""
+        seconds = _non_negative_float(self.get(Detail.AIR_FILTER_LIFETIME))
+        return seconds if seconds is not None else _non_negative_float(self.get(Detail.FILTER_RUNTIME))
 
     # --- alerts and water bucket ---
 
