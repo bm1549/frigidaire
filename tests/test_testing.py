@@ -32,6 +32,7 @@ def test_fake_raises_configured_error() -> None:
         pass
     else:
         raise AssertionError("expected the configured error")
+    assert fake.fetch_count == 1
 
 
 def test_fake_records_commands_through_the_real_builders() -> None:

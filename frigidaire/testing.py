@@ -106,7 +106,7 @@ class FakeFrigidaire(Frigidaire):
     """A ``Frigidaire`` with no HTTP: canned records in, recorded commands out.
 
     ``error`` is raised by the next fetch when set. ``commands`` lists every
-    ``(setting, value)`` pair sent, in order. ``fetch_count`` counts appliance-list fetches.
+    ``(setting, value)`` pair sent, in order. ``fetch_count`` counts appliance-list fetch attempts, failed ones included.
     """
 
     def __init__(
@@ -134,9 +134,9 @@ class FakeFrigidaire(Frigidaire):
         return fn()
 
     def _fetch_raw_appliances(self) -> list[dict]:
+        self.fetch_count += 1  # counts attempts, so callers can assert on backoff
         if self.error is not None:
             raise self.error
-        self.fetch_count += 1
         return [copy.deepcopy(record) for record in self.records.values()]
 
     def execute_action(self, appliance: Appliance, action: list[Component]) -> None:
