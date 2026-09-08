@@ -1,5 +1,7 @@
 """Frigidaire 2.0 API client"""
 
+from __future__ import annotations
+
 import gzip
 import json
 import logging
@@ -7,18 +9,68 @@ import random
 import threading
 import time
 from collections.abc import Callable
-from enum import Enum
-from typing import NoReturn, Optional, TypeVar, cast
+from typing import NoReturn, TypeVar, cast
 from urllib.parse import urlencode
 
 import requests
 import urllib3
 from requests import Response
 
+from .exceptions import AuthenticationError, FrigidaireException, SessionCapError
+from .model import (
+    Action,
+    Alert,
+    Appliance,
+    ApplianceState,
+    CaseInsensitiveEnum,
+    Component,
+    ConnectionState,
+    Destination,
+    Detail,
+    DisplayLight,
+    FanSpeed,
+    FilterState,
+    Mode,
+    Power,
+    Setting,
+    SleepMode,
+    Unit,
+    VerticalSwing,
+)
 from .rate_limit import RateLimiter, wrap_session_request
+from .session_store import JsonFileSessionStore, SessionStore
 from .signature_generator import get_signature
 
+__all__ = [
+    "Action",
+    "Alert",
+    "Appliance",
+    "ApplianceState",
+    "AuthenticationError",
+    "CaseInsensitiveEnum",
+    "Component",
+    "ConnectionState",
+    "Destination",
+    "Detail",
+    "DisplayLight",
+    "FanSpeed",
+    "FilterState",
+    "Frigidaire",
+    "FrigidaireException",
+    "JsonFileSessionStore",
+    "Mode",
+    "Power",
+    "SessionCapError",
+    "SessionStore",
+    "Setting",
+    "SleepMode",
+    "Unit",
+    "VerticalSwing",
+]
+
 T = TypeVar("T")
+
+_LOGGER = logging.getLogger(__name__)
 
 # Frigidaire uses a self-signed certificate, which forces us to disable SSL verification
 # To keep our logs free of spam, we disable warnings on insecure requests
@@ -35,14 +87,16 @@ CLIENT_ID = "FrigidaireOneApp"
 FRIGIDAIRE_USER_AGENT = "Ktor client"
 AUTH_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 12; sdk_gphone64_x86_64 Build/SE1A.220826.008)"
 
+SESSION_CAP_ERROR_CODE = "cas_3403"
+
 # Limiters are keyed by account so multiple Frigidaire instances for the same
 # account share spacing — without this, a config-flow re-validation that runs
 # alongside a live entry would compete and trip cas_3403.
 _SCOPED_LIMITERS: dict[str, RateLimiter] = {}
 
 # Re-authentication is serialised per account for the same reason the limiter is
-# shared: when several threads (one per appliance in Home Assistant) fail at once,
-# only the first should mint a new session; the rest wait and reuse it.
+# shared: when several threads fail at once, only the first should mint a new
+# session; the rest wait and reuse it.
 _SCOPED_REAUTH_LOCKS: dict[str, threading.Lock] = {}
 
 # Header names whose values are credentials; matched case-insensitively.
@@ -70,339 +124,6 @@ def _redact_payload(payload: str) -> str:
     return json.dumps({k: ("<redacted>" if k in _REDACT_PAYLOAD_KEYS else v) for k, v in data.items()})
 
 
-class FrigidaireException(Exception):
-    def __init__(self, message: str, *, status_code: int | None = None, error_code: str | None = None):
-        super().__init__(message)
-        self.status_code = status_code
-        self.error_code = error_code
-
-
-# Maps known Electrolux internal platform codenames to destination types.
-# These codenames appear in applianceData.modelName for newer devices instead
-# of the legacy "AC"/"DH" values. Add new entries here as they are confirmed.
-_MODEL_MAPPINGS: dict[str, "Destination"]
-
-
-class Destination(str, Enum):
-    AIR_CONDITIONER = "AC"
-    DEHUMIDIFIER = "DH"
-
-    @classmethod
-    def from_appliance_type(cls, appliance_type: str) -> "Destination":
-        """
-        Maps known model names to their corresponding destination types.
-        Falls back to direct enum lookup for backward compatibility.
-
-        :param appliance_type: The model name from the appliance data
-        :return: The appropriate Destination enum value
-        :raises ValueError: If the model name is not recognized
-        """
-        if appliance_type in _MODEL_MAPPINGS:
-            return _MODEL_MAPPINGS[appliance_type]
-        try:
-            return cls(appliance_type)
-        except ValueError as e:
-            raise ValueError(
-                f"'{appliance_type}' is not a recognized model name or destination type. "
-                f"Known destinations: {list(cls)}, "
-                f"Known models: {list(_MODEL_MAPPINGS.keys())}"
-            ) from e
-
-
-_MODEL_MAPPINGS = {
-    "Husky": Destination.DEHUMIDIFIER,  # e.g. FHDD5033W1 (50-pint WiFi dehumidifier)
-    "Eagle": Destination.DEHUMIDIFIER,  # e.g. GHDD5035W1 (50-pint Gallery WiFi dehumidifier)
-    "Panther": Destination.AIR_CONDITIONER,  # e.g. FHWW105WE1 (window inverter AC)
-    "Telica": Destination.AIR_CONDITIONER,  # e.g. GHPH142AA1 (portable inverter AC/heat)
-}
-
-# Reported property keys that are unique to each destination type.
-# Used to infer destination when the codename is not in _MODEL_MAPPINGS.
-_AC_PROPERTY_KEYS = {
-    "targetTemperatureC",
-    "targetTemperatureF",
-    "ambientTemperatureC",
-    "ambientTemperatureF",
-    "temperatureRepresentation",
-}
-# Note: "sensorHumidity" is deliberately absent. It is not DH-exclusive — Telica portable
-# ACs report a room humidity reading, so treating it as a DH marker misidentifies them.
-_DH_PROPERTY_KEYS = {"targetHumidity", "waterBucketLevel", "waterTankFull"}
-
-
-class Setting(str, Enum):
-    """
-    Writeable settings that are known valid names of Components.
-    These can be passed to the execute_action() API together with a target value
-    to change settings.
-    """
-
-    # Common
-    FAN_SPEED = "fanSpeedSetting"
-    EXECUTE_COMMAND = "executeCommand"
-    MODE = "mode"
-    SLEEP_MODE = "sleepMode"
-    UI_LOCK_MODE = "uiLockMode"
-    VERTICAL_SWING = "verticalSwing"
-
-    # AC
-    TARGET_TEMPERATURE_C = "targetTemperatureC"
-    TARGET_TEMPERATURE_F = "targetTemperatureF"
-    TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
-
-    # Humidifier
-    CLEAN_AIR_MODE = "cleanAirMode"
-    DISPLAY_LIGHT = "displayLight"
-    START_TIME = "startTime"
-    STOP_TIME = "stopTime"
-    TARGET_HUMIDITY = "targetHumidity"
-
-
-class Detail(str, Enum):
-    """
-    Readable details that are known to be present in some products.
-    """
-
-    # Common
-    ALERTS = "alerts"
-    APPLIANCE_STATE = "applianceState"
-    APPLIANCE_UI_SW_VERSION = "applianceUiSwVersion"
-    FAN_SPEED = "fanSpeedSetting"
-    FAN_SPEED_STATE = "fanSpeedState"
-    FILTER_STATE = "filterState"
-    MODE = "mode"
-    # The mode the appliance reports it is *actually* running, which can differ from the
-    # requested MODE — e.g. an ECO/AUTO unit reports "cool" or "fanOnly" as it cycles.
-    MODE_STATE = "modeState"
-    NETWORK_INTERFACE = "networkInterface"
-    # Room humidity reading. Reported by dehumidifiers and by some ACs (e.g. Telica).
-    SENSOR_HUMIDITY = "sensorHumidity"
-    UI_LOCK_MODE = "uiLockMode"
-    SLEEP_MODE = "sleepMode"
-    VERTICAL_SWING = "verticalSwing"
-
-    # AC
-    AMBIENT_TEMPERATURE_C = "ambientTemperatureC"
-    AMBIENT_TEMPERATURE_F = "ambientTemperatureF"
-    TARGET_TEMPERATURE_C = "targetTemperatureC"
-    TARGET_TEMPERATURE_F = "targetTemperatureF"
-    TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
-
-    # Air quality, on models with a particulate sensor. Units are µg/m³.
-    PM1 = "pm1"
-    PM10 = "pm10"
-    PM25 = "pm25"
-
-    # Humidifier
-    DISPLAY_LIGHT = "displayLight"
-    CLEAN_AIR_MODE = "cleanAirMode"
-    START_TIME = "startTime"
-    STOP_TIME = "stopTime"
-    TARGET_HUMIDITY = "targetHumidity"
-    WATER_BUCKET_LEVEL = "waterBucketLevel"
-    WATER_TANK_FULL = "waterTankFull"
-
-
-class Appliance:
-    def __init__(self, args: dict):
-        self.appliance_id: str = args["applianceId"]
-        self.appliance_type: str = args["applianceData"]["modelName"]
-        self.nickname: str = args["applianceData"]["applianceName"]
-        self.destination = self._resolve_destination(args)
-
-    def _resolve_destination(self, args: dict) -> Optional["Destination"]:
-        try:
-            return Destination.from_appliance_type(self.appliance_type)
-        except ValueError:
-            pass
-
-        # Check DH first: target-humidity/water-bucket keys are DH-exclusive, while the "AC"
-        # keys (ambient temperature, temperature representation) are also reported by
-        # dehumidifiers that display room temp. Note that a humidity *reading*
-        # ("sensorHumidity") is not a DH marker — some ACs report one too.
-        reported_keys = set(args.get("properties", {}).get("reported", {}).keys())
-        if reported_keys & _DH_PROPERTY_KEYS:
-            logging.warning(
-                f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
-                f"({self.appliance_id}) — inferred DEHUMIDIFIER from reported properties. "
-                f"Please report this at https://github.com/bm1549/frigidaire/issues"
-            )
-            return Destination.DEHUMIDIFIER
-        if reported_keys & _AC_PROPERTY_KEYS:
-            logging.warning(
-                f"Unknown appliance type '{self.appliance_type}' for '{self.nickname}' "
-                f"({self.appliance_id}) — inferred AIR_CONDITIONER from reported properties. "
-                f"Please report this at https://github.com/bm1549/frigidaire/issues"
-            )
-            return Destination.AIR_CONDITIONER
-
-        logging.warning(
-            f"Unrecognized appliance type '{self.appliance_type}' for '{self.nickname}' "
-            f"({self.appliance_id}) — skipping. Reported keys: {sorted(reported_keys)}. "
-            f"Please report this at https://github.com/bm1549/frigidaire/issues"
-        )
-        return None
-
-
-class Component:
-    def __init__(self, name: str | Setting, value: int | str):
-        """
-        Create a new Component to specify a setting with a name and value.
-        Note: String names are discouraged but allowed since not all settings are known at this time.
-
-        :param name: Name of the setting (Setting or a string).
-        :param value: Value of the setting (string or int)
-        """
-        if isinstance(name, Setting):
-            name = name.value
-        self.name = name
-        self.value = value
-
-
-class Unit(str, Enum):
-    FAHRENHEIT = "FAHRENHEIT"
-    CELSIUS = "CELSIUS"
-
-
-class ApplianceState(str, Enum):
-    OFF = "OFF"
-    RUNNING = "RUNNING"
-    DELAYED_START = "DELAYED_START"
-
-
-class FilterState(str, Enum):
-    BUY = "BUY"
-    CHANGE = "CHANGE"
-    CLEAN = "CLEAN"
-    GOOD = "GOOD"
-
-
-class Power(str, Enum):
-    ON = "ON"
-    OFF = "OFF"
-
-
-class SleepMode(str, Enum):
-    ON = "ON"
-    OFF = "OFF"
-
-
-class VerticalSwing(str, Enum):
-    ON = "ON"
-    OFF = "OFF"
-
-
-class DisplayLight(str, Enum):
-    # Unlike most other on/off settings, the API rejects plain "ON"/"OFF" for displayLight.
-    ON = "DISPLAY_LIGHT_1"
-    OFF = "DISPLAY_LIGHT_0"
-
-
-class Alert(str, Enum):
-    BUCKET_FULL = "BUCKET_FULL"
-    BUS_HIGH_VOLTAGE = "BUS_HIGH_VOLTAGE"
-    COMMUNICATION_FAULT = "COMMUNICATION_FAULT"
-    DC_MOTOR_FAULT = "DC_MOTOR_FAULT"
-    DC_MOTOR_LOST_SPEED = "DC_MOTOR_LOST_SPEED"
-    DRAIN_PAN_FULL = "DRAIN_PAN_FULL"
-    INDOOR_DEFROST_THERMISTOR_FAULT = "INDOOR_DEFROST_THERMISTOR_FAULT"
-    PM25_SENSOR_FAULT = "PM25_SENSOR_FAULT"
-    TUBE_HIGH_TEMPERATURE = "TUBE_HIGH_TEMPERATURE"
-    UNKNOWN_STATE_ERROR = "UNKNOWN_STATE_ERROR"
-
-
-class Mode(str, Enum):
-    # Air Conditioner
-    OFF = "OFF"
-    COOL = "COOL"
-    FAN = "FANONLY"
-    ECO = "ECO"
-    # Dehumidifier
-    DRY = "DRY"
-    AUTO = "AUTO"
-    CONTINUOUS = "CONTINUOUS"
-    QUIET = "QUIET"
-    SMART = "SMART"
-
-
-class FanSpeed(str, Enum):
-    # Common
-    LOW = "LOW"
-    MEDIUM = "MIDDLE"
-    HIGH = "HIGH"
-    # Air Conditioner
-    AUTO = "AUTO"
-
-
-class Action:
-    @classmethod
-    def set_power(cls, power: Power) -> list[Component]:
-        return [Component(Setting.EXECUTE_COMMAND, power)]
-
-    @classmethod
-    def set_mode(cls, mode: Mode) -> list[Component]:
-        return [Component(Setting.MODE, mode)]
-
-    @classmethod
-    def set_fan_speed(cls, fan_speed: FanSpeed) -> list[Component]:
-        return [Component(Setting.FAN_SPEED, fan_speed)]
-
-    @classmethod
-    def set_ui_lock_mode(cls, ui_lock_mode: bool) -> list[Component]:
-        return [Component(Setting.UI_LOCK_MODE, ui_lock_mode)]
-
-    @classmethod
-    def set_vertical_swing(cls, vertical_swing: VerticalSwing) -> list[Component]:
-        return [Component(Setting.VERTICAL_SWING, vertical_swing)]
-
-    @classmethod
-    def set_sleep_mode(cls, sleep_mode: SleepMode) -> list[Component]:
-        return [Component(Setting.SLEEP_MODE, sleep_mode)]
-
-    @classmethod
-    def set_display_light(cls, display_light: DisplayLight) -> list[Component]:
-        return [Component(Setting.DISPLAY_LIGHT, display_light)]
-
-    @classmethod
-    def set_stop_time(cls, stop_time: int) -> list[Component]:
-        """Stop time in seconds; device snaps to ~30-min increments (min ~1800s, use 0 to clear)."""
-        if stop_time < 0:
-            raise FrigidaireException("StopTime must be greater than or equal to 0")
-
-        return [Component(Setting.STOP_TIME, stop_time)]
-
-    @classmethod
-    def set_start_time(cls, start_time: int) -> list[Component]:
-        """Start time in seconds; device snaps to ~30-min increments (min ~1800s, use 0 to clear)."""
-        if start_time < 0:
-            raise FrigidaireException("StartTime must be greater than or equal to 0")
-
-        return [Component(Setting.START_TIME, start_time)]
-
-    @classmethod
-    def set_humidity(cls, humidity: int) -> list[Component]:
-        if humidity < 35 or humidity > 85:
-            raise FrigidaireException("Humidity must be between 35 and 85 percent, inclusive")
-
-        return [Component(Setting.TARGET_HUMIDITY, humidity)]
-
-    @classmethod
-    def set_temperature(cls, temperature: int, temperature_unit: Unit = Unit.FAHRENHEIT) -> list[Component]:
-        # Note: Frigidaire sets limits for temperature which could cause this action to fail
-        # Temperature ranges are below, inclusive of the endpoints
-        #   Fahrenheit: 60-90
-        #   Celsius: 16-32
-        logging.debug(f"Client setting target to {temperature} {temperature_unit}")
-        temperature_unit_setting = (
-            Setting.TARGET_TEMPERATURE_F if temperature_unit == Unit.FAHRENHEIT else Setting.TARGET_TEMPERATURE_C
-        )
-
-        return [
-            Component(Setting.TEMPERATURE_REPRESENTATION, temperature_unit),
-            Component(temperature_unit_setting, temperature),
-        ]
-
-
 def _generate_nonce() -> str:
     """
     Generate a one-off random token to preserve the security of encrypted communication
@@ -412,19 +133,20 @@ def _generate_nonce() -> str:
 
 class Frigidaire:
     """
-    An API for interfacing with Frigidaire Air Conditioners
-    This was reverse-engineered from the Frigidaire 2.0 App
+    An API for interfacing with Frigidaire air conditioners and dehumidifiers.
+    This was reverse-engineered from the Frigidaire 2.0 App.
     """
 
     def __init__(
         self,
         username: str,
         password: str,
-        session_key: str | None = None,
-        timeout: float | None = 15.0,
-        regional_base_url: str | None = None,
-        country_code: str = "US",
         *,
+        session_key: str | None = None,
+        regional_base_url: str | None = None,
+        session_store: SessionStore | None = None,
+        timeout: float | None = 15.0,
+        country_code: str = "US",
         rate_limit_min_interval: float = 1.25,
         rate_limit_jitter: float = 0.25,
         rate_limit_methods: frozenset[str] | set[str] | None = None,
@@ -433,18 +155,19 @@ class Frigidaire:
         max_retry_after: float = 60.0,
         session_max_retries: int = 2,
         session_retry_backoff: float = 0.0,
-        on_session_key_update: Callable[[str, str | None], None] | None = None,
     ):
         """
         Initializes a new instance of the Frigidaire API and authenticates against it
         :param username: The username to log in to Frigidaire. Generally, this is an email
         :param password: The password to log in to Frigidaire
-        :param session_key: The previously authenticated session key to connect to Frigidaire. If not specified,
-                            authentication is required
-        :param timeout: Per-request HTTP timeout in seconds (default 15.0). None disables the default.
+        :param session_key: A previously authenticated session key. Overrides the session store.
         :param regional_base_url: Regional base URL for the API user account
-                            (e.g., https://api.us.ocp.electrolux.one for U.S. accounts). If not specified,
-                            authentication is required
+                            (e.g., https://api.us.ocp.electrolux.one for U.S. accounts).
+        :param session_store: Where to load the session from and persist it to. The store always
+                            ends up holding the session the client is using, so a still-valid
+                            token survives restarts instead of lingering server-side until
+                            Electrolux's active-session cap (cas_3403) locks the account.
+        :param timeout: Per-request HTTP timeout in seconds (default 15.0). None disables the default.
         :param country_code: Country code from which to derive regional base URL. Defaults to "US".
         :param rate_limit_min_interval: Minimum seconds between mutating requests (default 1.25).
         :param rate_limit_jitter: Random jitter added to spacing to smooth bursts (default 0.25).
@@ -458,19 +181,18 @@ class Frigidaire:
                             retried. 0 disables session retries entirely.
         :param session_retry_backoff: Seconds to sleep before each session retry, scaled by attempt
                             number (default 0.0 = no delay).
-        :param on_session_key_update: Optional callback invoked with (session_key, regional_base_url)
-                            whenever a new session key is minted. Lets callers persist the key so it
-                            survives restarts instead of abandoning a still-valid token and minting a
-                            new server-side session (which Electrolux caps via cas_3403).
         """
         self.username = username
         self.password = password
-        self.session_key: str | None = session_key
-        self.regional_base_url = regional_base_url
         self.country_code = country_code
+        self._session_store = session_store
         self._session_max_retries = session_max_retries
         self._session_retry_backoff = session_retry_backoff
-        self._on_session_key_update = on_session_key_update
+
+        if session_key is None and session_store is not None:
+            session_key, regional_base_url = session_store.load()
+        self.session_key: str | None = session_key
+        self.regional_base_url = regional_base_url
 
         self._session = requests.Session()
         scope = rate_limit_scope_key or username
@@ -486,6 +208,8 @@ class Frigidaire:
         )
 
         self.authenticate()
+
+    # --- authentication ---
 
     def get_headers_frigidaire(self, method: str, include_bearer_token: bool) -> dict[str, str]:
         to_return = {
@@ -508,11 +232,8 @@ class Frigidaire:
             to_return["Content-Type"] = "application/x-www-form-urlencoded"
         return to_return
 
-    def test_connection(self) -> None:
-        """
-        Tests for successful connectivity to the Frigidaire server
-        :return:
-        """
+    def _test_connection(self) -> None:
+        """Raises unless the current session key is accepted by the regional API."""
         self.get_request(
             self.regional_base_url,
             "/one-account-user/api/v1/users/current?countryDetails=true",
@@ -521,27 +242,27 @@ class Frigidaire:
 
     def authenticate(self) -> None:
         """
-        Authenticates with the Frigidaire API
+        Authenticates with the Frigidaire API.
 
-        This will re-authenticate if the session key is deemed invalid
+        Reuses the current session key if the server still accepts it, otherwise runs the full
+        login flow. Either way the session store (if any) ends up holding the session in use.
 
-        Will throw an exception if the authentication request fails or returns an unexpected response
-        :return:
+        :raises AuthenticationError: if the credentials are rejected
+        :raises FrigidaireException: if any step fails or returns an unexpected response
         """
 
         if not self.regional_base_url:
             self.session_key = None
 
-        # Remember to include "Context-Brand: frigidaire" in the headers for
-        # the "/api/v1/identity-providers" and "/api/v1/users/current" calls
         if self.session_key:
-            logging.debug("Authentication requested but session key is present, testing session key")
+            _LOGGER.debug("Authentication requested but session key is present, testing session key")
             try:
-                self.test_connection()
-                logging.debug("Session key is still valid, doing nothing")
+                self._test_connection()
+                _LOGGER.debug("Session key is still valid, doing nothing")
+                self._persist_session()
                 return None
-            except (FrigidaireException, ConnectionError):
-                logging.debug("Session key is invalid, re-authenticating")
+            except FrigidaireException:
+                _LOGGER.debug("Session key is invalid, re-authenticating")
                 self.session_key = None
 
         data = {"grantType": "client_credentials", "clientId": CLIENT_ID, "clientSecret": CLIENT_SECRET, "scope": ""}
@@ -607,7 +328,11 @@ class Frigidaire:
             or session_info.get("sessionToken") is None
             or session_info.get("sessionSecret") is None
         ):
-            raise FrigidaireException(f"Failed to authenticate, sessionInfo was not in response: {login_response}")
+            # The identity provider answers 200 with an errorCode and no sessionInfo when the
+            # credentials are wrong. The body is not included: it echoes account details.
+            raise AuthenticationError(
+                f"Failed to authenticate, sessionInfo was not in response (errorCode={login_response.get('errorCode')})"
+            )
 
         auth_session_token = session_info["sessionToken"]
         auth_session_secret = session_info["sessionSecret"]
@@ -654,46 +379,24 @@ class Frigidaire:
 
         access_token = frigidaire_auth_response.get("accessToken")
         if access_token is None:
-            raise FrigidaireException(
-                f"Failed to authenticate, accessToken was not in response: {frigidaire_auth_response}"
-            )
+            raise FrigidaireException("Failed to authenticate, accessToken was not in response")
 
-        logging.debug("Authentication successful, storing new session key")
+        _LOGGER.debug("Authentication successful, storing new session key")
         self.session_key = access_token
-        self._emit_session_key_update()
+        self._persist_session()
 
-    def _emit_session_key_update(self) -> None:
-        """Notify the caller of a freshly minted session key so it can be persisted.
-
-        Best-effort: a failing callback must never sink authentication.
-        """
-        if self._on_session_key_update is None or self.session_key is None:
+    def _persist_session(self) -> None:
+        """Hand the session in use to the store. Best-effort: a failing store must never sink authentication."""
+        if self._session_store is None or self.session_key is None:
             return
         try:
-            self._on_session_key_update(self.session_key, self.regional_base_url)
+            self._session_store.save(self.session_key, self.regional_base_url)
         except Exception:
-            logging.exception("on_session_key_update callback failed")
+            _LOGGER.exception("Session store failed to save the session")
 
-    def re_authenticate(self) -> None:
-        """
-        Removes the session_key and tries to authenticate again
-        :return:
-        """
+    def _re_authenticate(self) -> None:
         self.session_key = None
         self.authenticate()
-
-    def _post_dict(
-        self, url: str | None, path: str, headers: dict[str, str], data: dict, form_encoding: bool = False
-    ) -> dict:
-        return cast(dict, self.post_request(url, path, headers, data, form_encoding))
-
-    def _get_list_of_dicts(self, url: str | None, path: str, headers: dict[str, str]) -> list[dict]:
-        return cast(list[dict], self.get_request(url, path, headers))
-
-    @staticmethod
-    def _is_session_cap(e: FrigidaireException) -> bool:
-        """Whether an exception is the Electrolux active-session cap (cas_3403)."""
-        return e.error_code == "cas_3403"
 
     def _with_reauth(self, fn: Callable[[], T]) -> T:
         """Run fn(), retrying on the existing session before falling back to re-authentication.
@@ -707,33 +410,32 @@ class Frigidaire:
 
         Re-authentication is serialised by a per-account lock: a thread that failed while
         another was minting a new session reuses that session instead of minting its own.
-
-        The number of retries and any delay between them are configurable via
-        ``session_max_retries`` and ``session_retry_backoff``.
         """
         last_attempt = self._session_max_retries
         for attempt in range(last_attempt + 1):
             key_before = self.session_key
             try:
                 return fn()
-            except FrigidaireException as e:
-                if self._is_session_cap(e):
-                    logging.debug("Rate limited - try again later")
-                    raise
+            except SessionCapError:
+                _LOGGER.debug("Session cap hit - try again later")
+                raise
+            except FrigidaireException:
                 if attempt == last_attempt:
                     raise
                 if attempt == last_attempt - 1:
                     with self._reauth_lock:
                         if self.session_key == key_before:
-                            logging.debug("Retry failed - attempting to re-authenticate")
-                            self.re_authenticate()
+                            _LOGGER.debug("Retry failed - attempting to re-authenticate")
+                            self._re_authenticate()
                         else:
-                            logging.debug("Another request already re-authenticated - retrying with the new session")
+                            _LOGGER.debug("Another request already re-authenticated - retrying with the new session")
                 else:
-                    logging.debug("Request failed - retrying on the existing session")
+                    _LOGGER.debug("Request failed - retrying on the existing session")
                 if self._session_retry_backoff:
                     time.sleep(self._session_retry_backoff * (attempt + 1))
         raise AssertionError("unreachable")  # pragma: no cover
+
+    # --- appliances ---
 
     def _fetch_raw_appliances(self) -> list[dict]:
         return self._get_list_of_dicts(
@@ -744,65 +446,35 @@ class Frigidaire:
 
     def get_appliances(self) -> list[Appliance]:
         """
-        Uses the Frigidaire API to fetch the list of appliances
-        Will authenticate if the request fails
-        :return: The appliances that are associated with the Frigidaire account
+        Fetch every appliance on the account, with its current reported state, in one request.
+        Will authenticate if the request fails.
+
+        Appliances of a type this library cannot place are skipped with a warning, as are
+        malformed records.
+        :return: A fresh snapshot of each appliance
         """
-        logging.debug("Listing appliances")
+        _LOGGER.debug("Listing appliances")
 
         def fetch() -> list[Appliance]:
-            return [a for a in (Appliance(raw) for raw in self._fetch_raw_appliances()) if a.destination is not None]
+            appliances = []
+            for record in self._fetch_raw_appliances():
+                try:
+                    appliance = Appliance(record)
+                except (KeyError, TypeError):
+                    _LOGGER.warning("Skipping malformed appliance record: %r", record)
+                    continue
+                if appliance.destination is not None:
+                    appliances.append(appliance)
+            return appliances
 
         return self._with_reauth(fetch)
 
-    def get_appliances_raw(self) -> list[dict]:
-        """
-        Fetch the complete raw record of every appliance on the account in one request.
-        Will authenticate if the request fails.
-
-        Integrations that poll several appliances should call this once per cycle and
-        pick records out by "applianceId" instead of calling get_appliance_raw() or
-        get_appliance_details() per appliance, which each repeat the same request.
-        :return: The full raw appliance records
-        """
-        logging.debug("Getting raw records for every appliance")
-        return self._with_reauth(self._fetch_raw_appliances)
-
-    def get_appliance_raw(self, appliance: Appliance) -> dict:
-        """
-        Uses the Frigidaire API to fetch the complete raw record for a given appliance.
-        Will authenticate if the request fails
-
-        Unlike get_appliance_details(), this keeps the keys that live alongside
-        "properties" — notably "connectionState" and "status" — which callers need in order
-        to tell a genuinely offline appliance from stale reported values.
-
-        :param appliance: The appliance to request from the API
-        :return: The full raw appliance record
-        """
-        logging.debug(f"Getting raw appliance record for appliance {appliance.nickname}")
-        for raw_appliance in self.get_appliances_raw():
-            if raw_appliance["applianceId"] == appliance.appliance_id:
-                return raw_appliance
-        raise FrigidaireException(f"Appliance {appliance.nickname} not found in list of appliances")
-
-    def get_appliance_details(self, appliance: Appliance) -> dict:
-        """
-        Uses the Frigidaire API to fetch details for a given appliance
-        Will authenticate if the request fails
-        :param appliance: The appliance to request from the API
-        :return: The details for the passed in appliance
-        """
-        logging.debug(f"Getting appliance details for appliance {appliance.nickname}")
-        return self.get_appliance_raw(appliance)["properties"]["reported"]
-
     def execute_action(self, appliance: Appliance, action: list[Component]) -> None:
         """
-        Executes any defined action on a given appliance
-        Will authenticate if the request fails
+        Sends each component of an action to an appliance, one request per component.
+        Will authenticate if the request fails.
         :param appliance: The appliance to perform the action on
-        :param action: The action to be performed
-        :return:
+        :param action: The components to send
         """
         path = f"/appliance/api/v2/appliances/{appliance.appliance_id}/command"
         headers = self.get_headers_frigidaire("PUT", include_bearer_token=True)
@@ -813,6 +485,89 @@ class Frigidaire:
                 self.put_request(self.regional_base_url, path, headers, data)
 
             self._with_reauth(send)
+
+    # --- commands ---
+    #
+    # These encode what the appliances actually need, so callers can express intent
+    # ("cool at 72") without knowing the protocol's ordering quirks.
+
+    def set_power(self, appliance: Appliance, on: bool) -> None:
+        self.execute_action(appliance, Action.set_power(Power.ON if on else Power.OFF))
+
+    def set_mode(self, appliance: Appliance, mode: Mode) -> None:
+        """Select an operating mode, powering the appliance on first.
+
+        Air conditioners: power-on is always sent, because the cloud reports the desired state
+        rather than the hardware state. After a failed turn-on it keeps saying RUNNING, so
+        gating on it would skip the power command on every retry; power is a set, not a
+        toggle, so this is harmless on a unit that really is running. A unit that was off
+        forgets its setpoint and engaging the mode restores a default, so the remembered
+        setpoint is re-sent last. Mode.AUTO is a dehumidifier value that an AC silently
+        ignores; its energy-saving mode is ECO.
+        """
+        if mode is Mode.OFF:
+            self.execute_action(appliance, Action.set_mode(Mode.OFF))
+            return
+
+        if appliance.destination is Destination.AIR_CONDITIONER:
+            if mode is Mode.AUTO:
+                mode = Mode.ECO
+            was_off = appliance.state is ApplianceState.OFF or appliance.mode is Mode.OFF
+            self.set_power(appliance, True)
+            self.execute_action(appliance, Action.set_mode(mode))
+            target = appliance.target_temperature
+            if was_off and target is not None:
+                self.set_temperature(appliance, int(target))
+            return
+
+        if appliance.state is ApplianceState.OFF:
+            self.set_power(appliance, True)
+        self.execute_action(appliance, Action.set_mode(mode))
+
+    def set_temperature(self, appliance: Appliance, temperature: int, unit: Unit | None = None) -> None:
+        """Set the AC setpoint. Defaults to the unit the appliance reports in."""
+        unit = unit or appliance.temperature_unit or Unit.FAHRENHEIT
+        self.execute_action(appliance, Action.set_temperature(int(temperature), unit))
+
+    def set_fan_speed(self, appliance: Appliance, fan_speed: FanSpeed) -> None:
+        self.execute_action(appliance, Action.set_fan_speed(fan_speed))
+
+    def set_humidity(self, appliance: Appliance, humidity: int) -> None:
+        """Set the dehumidifier target. Snaps to 5% steps; the appliance only accepts a target in Dry mode."""
+        components = Action.set_humidity(5 * round(humidity / 5))
+        self.set_mode(appliance, Mode.DRY)
+        self.execute_action(appliance, components)
+
+    def set_sleep_mode(self, appliance: Appliance, on: bool) -> None:
+        self.execute_action(appliance, Action.set_sleep_mode(SleepMode.ON if on else SleepMode.OFF))
+
+    def set_vertical_swing(self, appliance: Appliance, on: bool) -> None:
+        self.execute_action(appliance, Action.set_vertical_swing(VerticalSwing.ON if on else VerticalSwing.OFF))
+
+    def set_ui_lock(self, appliance: Appliance, on: bool) -> None:
+        self.execute_action(appliance, Action.set_ui_lock_mode(on))
+
+    def set_display_light(self, appliance: Appliance, on: bool) -> None:
+        self.execute_action(appliance, Action.set_display_light(DisplayLight.ON if on else DisplayLight.OFF))
+
+    def set_clean_air_mode(self, appliance: Appliance, on: bool) -> None:
+        self.execute_action(appliance, Action.set_clean_air_mode(on))
+
+    def set_start_time(self, appliance: Appliance, seconds: int) -> None:
+        self.execute_action(appliance, Action.set_start_time(seconds))
+
+    def set_stop_time(self, appliance: Appliance, seconds: int) -> None:
+        self.execute_action(appliance, Action.set_stop_time(seconds))
+
+    # --- HTTP ---
+
+    def _post_dict(
+        self, url: str | None, path: str, headers: dict[str, str], data: dict, form_encoding: bool = False
+    ) -> dict:
+        return cast(dict, self.post_request(url, path, headers, data, form_encoding))
+
+    def _get_list_of_dicts(self, url: str | None, path: str, headers: dict[str, str]) -> list[dict]:
+        return cast("list[dict]", self.get_request(url, path, headers))
 
     @staticmethod
     def parse_response(response: Response) -> dict:
@@ -831,7 +586,8 @@ class Frigidaire:
                     error_code = body.get("error")
             except Exception:
                 pass
-            raise FrigidaireException(
+            error_class = SessionCapError if error_code == SESSION_CAP_ERROR_CODE else FrigidaireException
+            raise error_class(
                 f"Request failed with status {response.status_code}: {response.content!r}",
                 status_code=response.status_code,
                 error_code=error_code,
@@ -851,7 +607,7 @@ class Frigidaire:
             else:
                 response_dict = response.json()
         except Exception as e:
-            logging.error(e)
+            _LOGGER.error(e)
             raise FrigidaireException(f"Received an unexpected response:\n{response.content!r}") from e
 
         return response_dict
@@ -869,10 +625,11 @@ class Frigidaire:
             f"Error processing request ({type(e).__name__}):\n"
             f"{method} {fullpath}\nheaders={safe_headers}\npayload={safe_payload}\n"
         )
-        logging.warning(error_str)
-        # Preserve structured error info from the wrapped exception so re-auth logic
-        # downstream can still recognise the failure class (e.g. the cas_3403 session cap).
-        raise FrigidaireException(
+        _LOGGER.warning(error_str)
+        # Preserve the exception class and structured fields so callers can still
+        # recognise the failure (e.g. the cas_3403 session cap).
+        error_class = type(e) if isinstance(e, FrigidaireException) else FrigidaireException
+        raise error_class(
             error_str,
             status_code=getattr(e, "status_code", None),
             error_code=getattr(e, "error_code", None),

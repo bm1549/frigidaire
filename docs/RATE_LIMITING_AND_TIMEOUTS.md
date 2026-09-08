@@ -46,7 +46,7 @@ api = Frigidaire(
 
 ## CLI Smoke Tests
 
-We provide a small script in `scripts/smoke_test_frigidaire.py` that exercises the new features without changing device state.
+We provide a small script in `smoke_test_frigidaire.py` that exercises the new features without changing device state.
 
 ```bash
 python3 -m venv .venv
@@ -61,7 +61,7 @@ export MIN_INTERVAL=1.5
 export JITTER=0.0
 export HTTP_TIMEOUT=15.0
 
-python scripts/smoke_test_frigidaire.py       --min-interval "${MIN_INTERVAL:-1.5}"       --jitter "${JITTER:-0.0}"       --http-timeout "${HTTP_TIMEOUT:-15.0}"
+python smoke_test_frigidaire.py       --min-interval "${MIN_INTERVAL:-1.5}"       --jitter "${JITTER:-0.0}"       --http-timeout "${HTTP_TIMEOUT:-15.0}"
 ```
 
 What it checks:

@@ -20,7 +20,7 @@ def test_concurrent_failures_reauthenticate_once(monkeypatch: pytest.MonkeyPatch
         reauth_calls.append(threading.get_ident())
         client.session_key = f"new-key-{len(reauth_calls)}"
 
-    monkeypatch.setattr(client, "re_authenticate", fake_reauthenticate)
+    monkeypatch.setattr(client, "_re_authenticate", fake_reauthenticate)
 
     def operation() -> str:
         if client.session_key == original_key:
@@ -48,7 +48,7 @@ def test_single_failure_still_reauthenticates(monkeypatch: pytest.MonkeyPatch) -
         calls.append("reauth")
         client.session_key = "new-key"
 
-    monkeypatch.setattr(client, "re_authenticate", fake_reauthenticate)
+    monkeypatch.setattr(client, "_re_authenticate", fake_reauthenticate)
     attempts: list[str | None] = []
 
     def operation() -> str:
