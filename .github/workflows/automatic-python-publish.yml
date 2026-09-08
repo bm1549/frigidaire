@@ -34,7 +34,7 @@ jobs:
         case "$MESSAGE" in
           *"[major]"*) VERSION="${{ steps.semvers.outputs.major }}" ;;
           *"[minor]"*) VERSION="${{ steps.semvers.outputs.minor }}" ;;
-          *)           VERSION="${{ steps.version.outputs.version }}" ;;
+          *)           VERSION="${{ steps.semvers.outputs.patch }}" ;;
         esac
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
     - name: Set up Python
