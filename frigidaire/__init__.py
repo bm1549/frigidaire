@@ -261,6 +261,9 @@ class Frigidaire:
                 _LOGGER.debug("Session key is still valid, doing nothing")
                 self._persist_session()
                 return None
+            except SessionCapError:
+                # Logging in again would mint yet another session; that is what hit the cap.
+                raise
             except FrigidaireException:
                 _LOGGER.debug("Session key is invalid, re-authenticating")
                 self.session_key = None

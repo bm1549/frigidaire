@@ -62,3 +62,15 @@ def test_authentication_error_is_a_frigidaire_exception() -> None:
     )
     with pytest.raises(FrigidaireException):
         Frigidaire(username="user", password="wrong", **NO_RATE_LIMIT)
+
+
+@responses.activate
+def test_session_cap_while_testing_the_session_is_not_retried_with_a_new_login() -> None:
+    """Minting a new session in response to the cap is what makes the cap worse."""
+    from tests.conftest import REGIONAL_URL, USERS_CURRENT_URL
+
+    responses.add(responses.GET, USERS_CURRENT_URL, json={"error": "cas_3403"}, status=429)
+    _stub_full_auth()
+    with pytest.raises(SessionCapError):
+        Frigidaire(username="u", password="p", session_key="k", regional_base_url=REGIONAL_URL, **NO_RATE_LIMIT)
+    assert [c.request.url for c in responses.calls] == [USERS_CURRENT_URL]
