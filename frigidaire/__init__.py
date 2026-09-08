@@ -292,6 +292,12 @@ class VerticalSwing(str, Enum):
     OFF = "OFF"
 
 
+class DisplayLight(str, Enum):
+    # Unlike most other on/off settings, the API rejects plain "ON"/"OFF" for displayLight.
+    ON = "DISPLAY_LIGHT_1"
+    OFF = "DISPLAY_LIGHT_0"
+
+
 class Alert(str, Enum):
     BUCKET_FULL = "BUCKET_FULL"
     BUS_HIGH_VOLTAGE = "BUS_HIGH_VOLTAGE"
@@ -352,6 +358,10 @@ class Action:
     @classmethod
     def set_sleep_mode(cls, sleep_mode: SleepMode) -> list[Component]:
         return [Component(Setting.SLEEP_MODE, sleep_mode)]
+
+    @classmethod
+    def set_display_light(cls, display_light: DisplayLight) -> list[Component]:
+        return [Component(Setting.DISPLAY_LIGHT, display_light)]
 
     @classmethod
     def set_stop_time(cls, stop_time: int) -> list[Component]:
