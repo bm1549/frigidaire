@@ -52,6 +52,37 @@ def test_rejected_login_raises_authentication_error() -> None:
 
 
 @responses.activate
+def test_disabled_account_raises_authentication_error() -> None:
+    _stub_full_auth()
+    responses.replace(
+        responses.POST,
+        f"https://accounts.{IDENTITY_DOMAIN}/accounts.login",
+        json={"errorCode": 403041, "errorMessage": "Account Disabled"},
+        status=200,
+    )
+    with pytest.raises(AuthenticationError):
+        Frigidaire(username="user", password="p", **NO_RATE_LIMIT)
+
+
+@responses.activate
+def test_account_pending_registration_is_not_a_credential_error() -> None:
+    """Seen in the wild (HA issue #77): the account was mid-registration and recovered once the
+    user re-logged in the app. New credentials would not have helped, so callers must retry rather
+    than prompt for a password."""
+    _stub_full_auth()
+    responses.replace(
+        responses.POST,
+        f"https://accounts.{IDENTITY_DOMAIN}/accounts.login",
+        json={"errorCode": 206001, "errorDetails": "Registration was not finalized"},
+        status=200,
+    )
+    with pytest.raises(FrigidaireException) as exc_info:
+        Frigidaire(username="user", password="p", **NO_RATE_LIMIT)
+    assert not isinstance(exc_info.value, AuthenticationError)
+    assert "206001" in str(exc_info.value)
+
+
+@responses.activate
 def test_authentication_error_is_a_frigidaire_exception() -> None:
     _stub_full_auth()
     responses.replace(

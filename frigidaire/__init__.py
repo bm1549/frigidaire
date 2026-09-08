@@ -89,6 +89,10 @@ AUTH_USER_AGENT = "Dalvik/2.1.0 (Linux; U; Android 12; sdk_gphone64_x86_64 Build
 
 SESSION_CAP_ERROR_CODE = "cas_3403"
 
+# Gigya login errorCodes that mean the credentials are rejected: invalid loginID or
+# password, and account disabled. Anything else is treated as transient.
+_CREDENTIAL_ERROR_CODES = frozenset({403042, 403041})
+
 # Limiters are keyed by account so multiple Frigidaire instances for the same
 # account share spacing — without this, a config-flow re-validation that runs
 # alongside a live entry would compete and trip cas_3403.
@@ -331,11 +335,13 @@ class Frigidaire:
             or session_info.get("sessionToken") is None
             or session_info.get("sessionSecret") is None
         ):
-            # The identity provider answers 200 with an errorCode and no sessionInfo when the
-            # credentials are wrong. The body is not included: it echoes account details.
-            raise AuthenticationError(
-                f"Failed to authenticate, sessionInfo was not in response (errorCode={login_response.get('errorCode')})"
-            )
+            # The identity provider answers 200 with an errorCode and no sessionInfo. Only the
+            # codes that mean the credentials themselves are rejected are AuthenticationError;
+            # transient account states (e.g. 206001 "pending registration") must stay retryable.
+            # The body is not included in the message: it echoes account details.
+            error_code = login_response.get("errorCode")
+            error_class = AuthenticationError if error_code in _CREDENTIAL_ERROR_CODES else FrigidaireException
+            raise error_class(f"Failed to authenticate, sessionInfo was not in response (errorCode={error_code})")
 
         auth_session_token = session_info["sessionToken"]
         auth_session_secret = session_info["sessionSecret"]

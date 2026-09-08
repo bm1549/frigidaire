@@ -74,17 +74,19 @@ def test_full_authenticate_happy_path() -> None:
 
 @responses.activate
 def test_authenticate_raises_when_session_info_missing() -> None:
-    """The library detects malformed login responses early."""
+    """A login response without sessionInfo and without a known credential errorCode is a
+    generic, retryable failure rather than a credential rejection."""
     _stub_full_auth()
     responses.replace(
         responses.POST,
         f"https://accounts.{IDENTITY_DOMAIN}/accounts.login",
-        json={"errorMessage": "bad credentials"},  # no sessionInfo
+        json={"errorMessage": "unexpected"},  # no sessionInfo, no errorCode
         status=200,
     )
 
-    with pytest.raises(AuthenticationError, match="sessionInfo was not in response"):
+    with pytest.raises(FrigidaireException, match="sessionInfo was not in response") as exc_info:
         Frigidaire(username="user", password="pass", **NO_RATE_LIMIT)
+    assert not isinstance(exc_info.value, AuthenticationError)
 
 
 @responses.activate
