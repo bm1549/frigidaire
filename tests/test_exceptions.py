@@ -7,6 +7,7 @@ from frigidaire import (
     AuthenticationError,
     Frigidaire,
     FrigidaireException,
+    LoginError,
     SessionCapError,
 )
 from tests.conftest import APPLIANCES_URL, IDENTITY_DOMAIN, NO_RATE_LIMIT, make_authenticated_client
@@ -76,10 +77,16 @@ def test_account_pending_registration_is_not_a_credential_error() -> None:
         json={"errorCode": 206001, "errorDetails": "Registration was not finalized"},
         status=200,
     )
-    with pytest.raises(FrigidaireException) as exc_info:
+    with pytest.raises(LoginError) as exc_info:
         Frigidaire(username="user", password="p", **NO_RATE_LIMIT)
     assert not isinstance(exc_info.value, AuthenticationError)
     assert "206001" in str(exc_info.value)
+
+
+def test_authentication_error_is_a_login_error() -> None:
+    """Config flows can catch LoginError for any rejected login; runtime reauth keys off the subclass."""
+    assert issubclass(AuthenticationError, LoginError)
+    assert issubclass(LoginError, FrigidaireException)
 
 
 @responses.activate

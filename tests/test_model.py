@@ -270,6 +270,13 @@ def test_timers() -> None:
     assert Appliance(_raw("AC", reported={})).start_time is None
 
 
+def test_unset_timer_reported_as_minus_one_is_zero() -> None:
+    """FGAC-series dehumidifiers report -1 (INVALID_OR_NOT_SET_TIME) for a timer that is not set."""
+    appliance = Appliance(_raw("DH", reported={"startTime": -1, "stopTime": -1}))
+    assert appliance.start_time == 0
+    assert appliance.stop_time == 0
+
+
 def test_pm25() -> None:
     assert Appliance(_raw("AC", reported={"pm25": 2})).pm25 == 2
     assert Appliance(_raw("AC", reported={"pm25": -1})).pm25 is None

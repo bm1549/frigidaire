@@ -581,17 +581,20 @@ class Appliance:
 
     # --- timers ---
 
+    def _timer(self, key: Detail) -> int | None:
+        # Some dehumidifiers report -1 (INVALID_OR_NOT_SET_TIME) for a timer that is not set.
+        seconds = _finite_float(self.get(key))
+        return None if seconds is None else max(0, int(seconds))
+
     @property
     def start_time(self) -> int | None:
         """Seconds until a scheduled start, or 0 when no start timer is set."""
-        seconds = _non_negative_float(self.get(Detail.START_TIME))
-        return None if seconds is None else int(seconds)
+        return self._timer(Detail.START_TIME)
 
     @property
     def stop_time(self) -> int | None:
         """Seconds until a scheduled stop, or 0 when no stop timer is set."""
-        seconds = _non_negative_float(self.get(Detail.STOP_TIME))
-        return None if seconds is None else int(seconds)
+        return self._timer(Detail.STOP_TIME)
 
     # --- air quality and network ---
 

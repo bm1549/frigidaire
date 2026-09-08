@@ -16,7 +16,7 @@ import requests
 import urllib3
 from requests import Response
 
-from .exceptions import AuthenticationError, FrigidaireException, SessionCapError
+from .exceptions import AuthenticationError, FrigidaireException, LoginError, SessionCapError
 from .model import (
     Action,
     Alert,
@@ -58,6 +58,7 @@ __all__ = [
     "Frigidaire",
     "FrigidaireException",
     "JsonFileSessionStore",
+    "LoginError",
     "Mode",
     "Power",
     "SessionCapError",
@@ -340,7 +341,7 @@ class Frigidaire:
             # transient account states (e.g. 206001 "pending registration") must stay retryable.
             # The body is not included in the message: it echoes account details.
             error_code = login_response.get("errorCode")
-            error_class = AuthenticationError if error_code in _CREDENTIAL_ERROR_CODES else FrigidaireException
+            error_class = AuthenticationError if error_code in _CREDENTIAL_ERROR_CODES else LoginError
             raise error_class(f"Failed to authenticate, sessionInfo was not in response (errorCode={error_code})")
 
         auth_session_token = session_info["sessionToken"]

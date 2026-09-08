@@ -16,7 +16,13 @@ class FrigidaireException(Exception):
         self.error_code = error_code
 
 
-class AuthenticationError(FrigidaireException):
+class LoginError(FrigidaireException):
+    """The identity provider rejected the login for any reason (bad credentials, an account in a
+    transient state, an account without a password). Setup flows can treat this as "check your
+    login"; only the ``AuthenticationError`` subclass is certain enough to prompt for new credentials."""
+
+
+class AuthenticationError(LoginError):
     """The account credentials were rejected. Retrying will not help; new credentials are needed."""
 
 
