@@ -299,3 +299,32 @@ def test_network_absent() -> None:
     appliance = Appliance(_raw("AC", reported={}))
     assert appliance.wifi_rssi is None
     assert appliance.wifi_link_quality is None
+
+
+# --- raw record and Husky/Eagle telemetry ---
+
+
+def test_raw_keeps_the_whole_record() -> None:
+    record = {**_raw("AC", reported={"mode": "COOL"}), "status": "enabled", "connectionState": "Connected"}
+    assert Appliance(record).raw == record
+
+
+@pytest.mark.parametrize("value,expected", [("on", True), ("OFF", False), (None, None)])
+def test_compressor_running_from_compressor_state(value, expected) -> None:
+    reported = {} if value is None else {"compressorState": value}
+    assert Appliance(_raw("Husky", reported=reported)).compressor_running is expected
+
+
+def test_condensate_pump_and_hepa_filter() -> None:
+    appliance = Appliance(_raw("Husky", reported={"condensatePump": "off", "hepaFilterInsertedState": "on"}))
+    assert appliance.condensate_pump_running is False
+    assert appliance.hepa_filter_inserted is True
+    assert Appliance(_raw("DH", reported={})).condensate_pump_running is None
+    assert Appliance(_raw("DH", reported={})).hepa_filter_inserted is None
+
+
+def test_runtime_counters() -> None:
+    appliance = Appliance(_raw("Eagle", reported={"compressorRuntime": 1323904, "totalRuntime": 3613076}))
+    assert appliance.compressor_runtime_seconds == 1323904
+    assert appliance.total_runtime_seconds == 3613076
+    assert Appliance(_raw("DH", reported={})).total_runtime_seconds is None

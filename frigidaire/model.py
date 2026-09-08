@@ -114,6 +114,9 @@ class Detail(str, Enum):
     # Common
     AIR_FILTER_LIFETIME = "airFilterLifeTime"
     FILTER_RUNTIME = "filterRuntime"  # the same reading on Husky/Eagle dehumidifiers
+    COMPRESSOR_STATE = "compressorState"  # real telemetry, seen on Husky/Eagle dehumidifiers
+    COMPRESSOR_RUNTIME = "compressorRuntime"
+    TOTAL_RUNTIME = "totalRuntime"
     ALERTS = "alerts"
     APPLIANCE_STATE = "applianceState"
     APPLIANCE_UI_SW_VERSION = "applianceUiSwVersion"
@@ -144,8 +147,10 @@ class Detail(str, Enum):
     PM25 = "pm25"
 
     # Humidifier
+    CONDENSATE_PUMP = "condensatePump"
     DISPLAY_LIGHT = "displayLight"
     CLEAN_AIR_MODE = "cleanAirMode"
+    HEPA_FILTER_INSERTED_STATE = "hepaFilterInsertedState"
     START_TIME = "startTime"
     STOP_TIME = "stopTime"
     TARGET_HUMIDITY = "targetHumidity"
@@ -380,6 +385,7 @@ class Appliance:
     """
 
     def __init__(self, record: dict) -> None:
+        self.raw: dict = record
         self.appliance_id: str = record["applianceId"]
         data = record.get("applianceData") or {}
         self.appliance_type: str = data["modelName"]
@@ -590,6 +596,29 @@ class Appliance:
     @property
     def clean_air_mode(self) -> bool | None:
         return self._on_off(Detail.CLEAN_AIR_MODE)
+
+    # --- telemetry some models report ---
+
+    @property
+    def compressor_running(self) -> bool | None:
+        """Real compressor state, on models that report it (Husky/Eagle dehumidifiers do)."""
+        return self._on_off(Detail.COMPRESSOR_STATE)
+
+    @property
+    def condensate_pump_running(self) -> bool | None:
+        return self._on_off(Detail.CONDENSATE_PUMP)
+
+    @property
+    def hepa_filter_inserted(self) -> bool | None:
+        return self._on_off(Detail.HEPA_FILTER_INSERTED_STATE)
+
+    @property
+    def compressor_runtime_seconds(self) -> float | None:
+        return _non_negative_float(self.get(Detail.COMPRESSOR_RUNTIME))
+
+    @property
+    def total_runtime_seconds(self) -> float | None:
+        return _non_negative_float(self.get(Detail.TOTAL_RUNTIME))
 
     # --- timers ---
 
