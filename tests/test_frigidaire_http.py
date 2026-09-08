@@ -1,4 +1,4 @@
-"""Tests for the Frigidaire HTTP orchestration (get_appliances, get_appliance_details, execute_action, re-auth).
+"""Tests for the Frigidaire HTTP orchestration (get_appliances, execute_action, re-auth).
 
 The full authenticate() flow is exercised in test_authenticate.py. Here we shortcut
 authentication by passing a valid session_key + regional_base_url, which makes
@@ -63,77 +63,6 @@ def test_get_appliances_skips_unresolvable_appliance() -> None:
 
 
 @responses.activate
-def test_get_appliance_details_finds_matching_appliance() -> None:
-    client = make_authenticated_client()
-    responses.add(
-        responses.GET,
-        APPLIANCES_URL,
-        json=[
-            {
-                "applianceId": "AC1",
-                "applianceData": {"modelName": "AC", "applianceName": "Bedroom"},
-                "properties": {"reported": {"targetTemperatureF": 72, "mode": "COOL"}},
-            },
-        ],
-        status=200,
-    )
-    details = client.get_appliance_details(make_appliance(nickname="Bedroom"))
-    assert details == {"targetTemperatureF": 72, "mode": "COOL"}
-
-
-@responses.activate
-def test_get_appliance_details_raises_when_not_found() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
-    with pytest.raises(FrigidaireException, match="not found"):
-        client.get_appliance_details(make_appliance(appliance_id="MISSING"))
-
-
-@responses.activate
-def test_get_appliance_raw_keeps_keys_outside_properties() -> None:
-    """connectionState lives beside `properties`, so get_appliance_details() cannot see it."""
-    client = make_authenticated_client()
-    raw = {
-        "applianceId": "AC1",
-        "applianceData": {"modelName": "AC", "applianceName": "Bedroom"},
-        "properties": {"reported": {"targetTemperatureF": 72, "mode": "COOL"}},
-        "status": "enabled",
-        "connectionState": "Connected",
-    }
-    responses.add(responses.GET, APPLIANCES_URL, json=[raw], status=200)
-
-    assert client.get_appliance_raw(make_appliance(nickname="Bedroom")) == raw
-
-
-@responses.activate
-def test_get_appliance_details_still_returns_only_reported() -> None:
-    """get_appliance_raw() must not change what existing get_appliance_details() callers see."""
-    client = make_authenticated_client()
-    responses.add(
-        responses.GET,
-        APPLIANCES_URL,
-        json=[
-            {
-                "applianceId": "AC1",
-                "applianceData": {"modelName": "AC", "applianceName": "Bedroom"},
-                "properties": {"reported": {"mode": "COOL"}, "desired": {"mode": "DRY"}},
-                "connectionState": "Connected",
-            },
-        ],
-        status=200,
-    )
-    assert client.get_appliance_details(make_appliance(nickname="Bedroom")) == {"mode": "COOL"}
-
-
-@responses.activate
-def test_get_appliance_raw_raises_when_not_found() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
-    with pytest.raises(FrigidaireException, match="not found"):
-        client.get_appliance_raw(make_appliance(appliance_id="MISSING"))
-
-
-@responses.activate
 def test_execute_action_puts_each_component_separately() -> None:
     """Action.set_temperature returns 2 components; each must be a separate PUT."""
     client = make_authenticated_client()
@@ -179,7 +108,7 @@ def test_429_with_cas_3403_does_not_reauth(monkeypatch: pytest.MonkeyPatch) -> N
     """Re-authenticating on a 429 makes things worse; the library must propagate it."""
     client = make_authenticated_client()
     reauth_called: list[bool] = []
-    monkeypatch.setattr(client, "re_authenticate", lambda: reauth_called.append(True))
+    monkeypatch.setattr(client, "_re_authenticate", lambda: reauth_called.append(True))
 
     responses.add(
         responses.GET,
@@ -202,7 +131,7 @@ def test_transient_failure_retries_on_existing_session_without_reauth(monkeypatc
     """
     client = make_authenticated_client()
     reauth_called: list[bool] = []
-    monkeypatch.setattr(client, "re_authenticate", lambda: reauth_called.append(True))
+    monkeypatch.setattr(client, "_re_authenticate", lambda: reauth_called.append(True))
 
     # First call fails with a generic 500; retry on the same session succeeds.
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
@@ -224,7 +153,7 @@ def test_persistent_failure_reauths_after_retry_also_fails(monkeypatch: pytest.M
         reauth_called.append(True)
         client.session_key = "new-key"
 
-    monkeypatch.setattr(client, "re_authenticate", fake_reauth)
+    monkeypatch.setattr(client, "_re_authenticate", fake_reauth)
 
     # First call and the retry both fail; only then re-auth, and the third call succeeds.
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
@@ -263,7 +192,7 @@ def test_session_max_retries_zero_makes_single_attempt(monkeypatch: pytest.Monke
     """With session retries disabled, a failure is raised immediately — no retry, no re-auth."""
     client = make_authenticated_client(session_max_retries=0)
     reauth_called: list[bool] = []
-    monkeypatch.setattr(client, "re_authenticate", lambda: reauth_called.append(True))
+    monkeypatch.setattr(client, "_re_authenticate", lambda: reauth_called.append(True))
 
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     with pytest.raises(FrigidaireException):
@@ -280,7 +209,7 @@ def test_session_retry_backoff_sleeps_between_attempts(monkeypatch: pytest.Monke
     monkeypatch.setattr("frigidaire.time.sleep", lambda s: sleeps.append(s))
 
     client = make_authenticated_client(session_retry_backoff=0.5)
-    monkeypatch.setattr(client, "re_authenticate", lambda: None)
+    monkeypatch.setattr(client, "_re_authenticate", lambda: None)
 
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
@@ -293,7 +222,7 @@ def test_session_retry_backoff_sleeps_between_attempts(monkeypatch: pytest.Monke
 def test_execute_action_cas_3403_propagates_without_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
     client = make_authenticated_client()
     reauth_called = []
-    monkeypatch.setattr(client, "re_authenticate", lambda: reauth_called.append(True))
+    monkeypatch.setattr(client, "_re_authenticate", lambda: reauth_called.append(True))
 
     responses.add(
         responses.PUT,
@@ -307,22 +236,25 @@ def test_execute_action_cas_3403_propagates_without_reauth(monkeypatch: pytest.M
 
 
 @responses.activate
-def test_get_appliances_raw_returns_every_record_in_one_request() -> None:
+def test_get_appliances_skips_malformed_record(caplog: pytest.LogCaptureFixture) -> None:
     client = make_authenticated_client()
-    records = [
-        make_raw_appliance(appliance_id="A1", nickname="One"),
-        make_raw_appliance(appliance_id="A2", nickname="Two"),
-    ]
-    responses.add(responses.GET, APPLIANCES_URL, json=records, status=200)
-
-    assert client.get_appliances_raw() == records
-    assert len([c for c in responses.calls if c.request.url == APPLIANCES_URL]) == 1
+    responses.add(
+        responses.GET,
+        APPLIANCES_URL,
+        json=[
+            {"applianceData": {"modelName": "AC", "applianceName": "no id"}},
+            {"applianceId": "OK", "applianceData": {"modelName": "AC", "applianceName": "n"}},
+        ],
+        status=200,
+    )
+    assert [a.appliance_id for a in client.get_appliances()] == ["OK"]
+    assert "malformed" in caplog.text
 
 
 @responses.activate
-def test_get_appliance_raw_uses_the_shared_fetch() -> None:
+def test_get_appliances_returns_fresh_state_each_call() -> None:
     client = make_authenticated_client()
-    record = make_raw_appliance(appliance_id="A1", nickname="One")
-    responses.add(responses.GET, APPLIANCES_URL, json=[record], status=200)
-
-    assert client.get_appliance_raw(make_appliance(appliance_id="A1")) == record
+    responses.add(responses.GET, APPLIANCES_URL, json=[make_raw_appliance(reported={"mode": "COOL"})], status=200)
+    responses.add(responses.GET, APPLIANCES_URL, json=[make_raw_appliance(reported={"mode": "OFF"})], status=200)
+    assert client.get_appliances()[0].mode is Mode.COOL
+    assert client.get_appliances()[0].mode is Mode.OFF

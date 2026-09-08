@@ -1,15 +1,7 @@
 import configparser
 import logging
 
-from frigidaire import (
-    Action,
-    FanSpeed,
-    Frigidaire,
-    Mode,
-    Power,
-    SleepMode,
-    VerticalSwing,
-)
+from frigidaire import FanSpeed, Frigidaire, JsonFileSessionStore, Mode
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
@@ -20,105 +12,64 @@ if __name__ == "__main__":
     [credentials]
     username=email@example.com
     password=password
-    ; session_key=insert_session_key_here
-    ; regional_base_url=https://api.us.ocp.electrolux.one
     """
     config = configparser.ConfigParser()
     config.read("config.ini")
     credentials = config["credentials"] or {}
 
-    username = credentials.get("username")
-    password = credentials.get("password")
-    session_key = credentials.get("session_key", fallback=None)
-    regional_base_url = credentials.get("regional_base_url", fallback=None)
-
     frigidaire = Frigidaire(
-        username,
-        password,
-        session_key=session_key,
-        regional_base_url=regional_base_url,
+        credentials.get("username"),
+        credentials.get("password"),
+        # The session survives re-runs of this script instead of minting a new one each time.
+        session_store=JsonFileSessionStore("session.json"),
         # timeout=5,  # uncomment this if testing the request timeout
     )
 
-    # tests connectivity
-    logging.debug("tests connectivity")
-    frigidaire.test_connection()
-
-    # get appliances
-    logging.debug("get appliance")
     appliances = frigidaire.get_appliances()
+    for appliance in appliances:
+        logging.debug(
+            "%s: state=%s mode=%s target=%s %s ambient=%s",
+            appliance,
+            appliance.state,
+            appliance.mode,
+            appliance.target_temperature,
+            appliance.temperature_unit,
+            appliance.ambient_temperature,
+        )
 
     # pick one arbitrarily
     appliance = appliances[0]
 
-    # get some details for it
-    logging.debug("get details")
-    appliance_details = frigidaire.get_appliance_details(appliance)
+    logging.debug("cool at 75")
+    frigidaire.set_mode(appliance, Mode.COOL)
+    frigidaire.set_temperature(appliance, 75)
 
-    # turn on
-    logging.debug("turn on")
-    frigidaire.execute_action(appliance, Action.set_power(Power.ON))
+    logging.debug("fan to medium")
+    frigidaire.set_fan_speed(appliance, FanSpeed.MEDIUM)
 
-    # set to cool
-    logging.debug("set to cool")
-    frigidaire.execute_action(appliance, Action.set_mode(Mode.COOL))
+    logging.debug("vertical swing on, then off")
+    frigidaire.set_vertical_swing(appliance, True)
+    frigidaire.set_vertical_swing(appliance, False)
 
-    # set fan to medium
-    logging.debug("set fan to medium")
-    frigidaire.execute_action(appliance, Action.set_fan_speed(FanSpeed.MEDIUM))
+    logging.debug("ui lock on, then off")
+    frigidaire.set_ui_lock(appliance, True)
+    frigidaire.set_ui_lock(appliance, False)
 
-    # set temperature to 75
-    logging.debug("set temp to 75")
-    frigidaire.execute_action(appliance, Action.set_temperature(75))
+    logging.debug("sleep mode on, then off")
+    frigidaire.set_sleep_mode(appliance, True)
+    frigidaire.set_sleep_mode(appliance, False)
 
-    # set vertical swing ON
-    logging.debug("set vertical swing ON")
-    frigidaire.execute_action(appliance, Action.set_vertical_swing(VerticalSwing.ON))
+    # stop time only works while the appliance is on
+    logging.debug("set stop time, then clear it")
+    frigidaire.set_stop_time(appliance, 1800)
+    frigidaire.set_stop_time(appliance, 0)
 
-    # set vertical swing OFF
-    logging.debug("set vertical swing OFF")
-    frigidaire.execute_action(appliance, Action.set_vertical_swing(VerticalSwing.OFF))
+    # start time only works while the appliance is off
+    logging.debug("turn off, set start time, then clear it")
+    frigidaire.set_power(appliance, False)
+    frigidaire.set_start_time(appliance, 1800)
+    frigidaire.set_start_time(appliance, 0)
 
-    # set ui lock mode ON
-    logging.debug("set ui lock mode ON")
-    frigidaire.execute_action(appliance, Action.set_ui_lock_mode(True))
-
-    # set ui lock mode OFF
-    logging.debug("set ui lock mode OFF")
-    frigidaire.execute_action(appliance, Action.set_ui_lock_mode(False))
-
-    # set sleep mode ON
-    logging.debug("set sleep mode ON")
-    frigidaire.execute_action(appliance, Action.set_sleep_mode(SleepMode.ON))
-
-    # set sleep mode OFF
-    logging.debug("set sleep mode OFF")
-    frigidaire.execute_action(appliance, Action.set_sleep_mode(SleepMode.OFF))
-
-    # set stop time, only works when the appliance is on
-    logging.debug("set stop time")
-    frigidaire.execute_action(appliance, Action.set_stop_time(1800))
-
-    # clear stop time
-    logging.debug("clear stop time")
-    frigidaire.execute_action(appliance, Action.set_stop_time(0))
-
-    # turn off, start time only works when the unit is off, so we turn it off here
-    logging.debug("turn off")
-    frigidaire.execute_action(appliance, Action.set_power(Power.OFF))
-
-    # set start time
-    logging.debug("set start time")
-    frigidaire.execute_action(appliance, Action.set_start_time(1800))
-
-    # clear start time
-    logging.debug("clear start time")
-    frigidaire.execute_action(appliance, Action.set_start_time(0))
-
-    # re-authenticate the connection to get a new session_key
-    logging.debug("re-authenticate")
-    frigidaire.re_authenticate()
-
-    # turn off
-    logging.debug("turn off")
-    frigidaire.execute_action(appliance, Action.set_power(Power.OFF))
+    # re-read the state after the commands
+    appliance = next(a for a in frigidaire.get_appliances() if a.appliance_id == appliance.appliance_id)
+    logging.debug("now: state=%s mode=%s", appliance.state, appliance.mode)

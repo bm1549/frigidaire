@@ -6,6 +6,7 @@ import pytest
 import responses
 
 from frigidaire import _SCOPED_LIMITERS, _SCOPED_REAUTH_LOCKS, Appliance, Frigidaire
+from frigidaire.model import _WARNED_APPLIANCE_IDS
 
 # Default kwargs that disable rate limiting and 429 retries — tests should
 # spread these into Frigidaire() constructors so they run instantly.
@@ -21,6 +22,7 @@ def _reset_scoped_state() -> None:
     """Each test gets a fresh limiter and re-auth lock scope so neither leaks across tests."""
     _SCOPED_LIMITERS.clear()
     _SCOPED_REAUTH_LOCKS.clear()
+    _WARNED_APPLIANCE_IDS.clear()
 
 
 GLOBAL_URL = "https://api.ocp.electrolux.one"
