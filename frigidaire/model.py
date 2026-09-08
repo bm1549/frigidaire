@@ -337,8 +337,11 @@ def _parse_on_off(value: Any) -> bool | None:
 
 
 def _finite_float(value: Any) -> float | None:
+    """A finite number, or None. Integers stay integers so readings keep the precision they were reported with."""
     if isinstance(value, bool):
         return None
+    if isinstance(value, int):
+        return value
     try:
         number = float(value)
     except (TypeError, ValueError):

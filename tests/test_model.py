@@ -161,6 +161,12 @@ def test_humidity_readings() -> None:
     assert appliance.target_humidity == 45
 
 
+def test_readings_keep_the_reported_number_type() -> None:
+    """An integer reading must not gain a spurious decimal; a string reading is parsed."""
+    assert isinstance(Appliance(_raw("DH", reported={"sensorHumidity": 55})).humidity, int)
+    assert Appliance(_raw("DH", reported={"sensorHumidity": "55.5"})).humidity == 55.5
+
+
 @pytest.mark.parametrize("value", [-1, 101, "n/a", None])
 def test_implausible_humidity_is_none(value) -> None:
     appliance = Appliance(_raw("DH", reported={"sensorHumidity": value}))
