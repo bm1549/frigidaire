@@ -106,7 +106,8 @@ class FakeFrigidaire(Frigidaire):
     """A ``Frigidaire`` with no HTTP: canned records in, recorded commands out.
 
     ``error`` is raised by the next fetch when set. ``commands`` lists every
-    ``(setting, value)`` pair sent, in order. ``fetch_count`` counts appliance-list fetch attempts, failed ones included.
+    ``(setting, value)`` pair sent, in order. ``fetch_count`` counts appliance-list fetch
+    attempts, failed ones included.
     """
 
     def __init__(
