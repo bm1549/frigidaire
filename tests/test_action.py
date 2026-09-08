@@ -1,8 +1,10 @@
 """Tests for Action factory methods."""
 
+import json
+
 import pytest
 
-from frigidaire import Action, FrigidaireException, Setting, Unit
+from frigidaire import Action, DisplayLight, FrigidaireException, Setting, Unit
 
 
 @pytest.mark.parametrize("humidity", [35, 50, 85])
@@ -33,3 +35,29 @@ def test_set_temperature_celsius() -> None:
     assert components[0].value == Unit.CELSIUS
     assert components[1].name == Setting.TARGET_TEMPERATURE_C.value
     assert components[1].value == 22
+
+
+def test_set_display_light_on() -> None:
+    components = Action.set_display_light(DisplayLight.ON)
+    assert len(components) == 1
+    assert components[0].name == Setting.DISPLAY_LIGHT.value
+    assert components[0].value == "DISPLAY_LIGHT_1"
+
+
+def test_set_display_light_off() -> None:
+    components = Action.set_display_light(DisplayLight.OFF)
+    assert len(components) == 1
+    assert components[0].name == Setting.DISPLAY_LIGHT.value
+    assert components[0].value == "DISPLAY_LIGHT_0"
+
+
+def test_display_light_enum_matches_api_values() -> None:
+    # The API rejects plain ON/OFF for this setting; a future rename must not
+    # silently change the values sent over the wire.
+    assert DisplayLight.ON.value == "DISPLAY_LIGHT_1"
+    assert DisplayLight.OFF.value == "DISPLAY_LIGHT_0"
+
+
+def test_set_display_light_serializes_to_api_string() -> None:
+    components = Action.set_display_light(DisplayLight.ON)
+    assert json.dumps(components[0].value) == '"DISPLAY_LIGHT_1"'
