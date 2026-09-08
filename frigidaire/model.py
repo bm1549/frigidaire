@@ -73,6 +73,16 @@ _AC_PROPERTY_KEYS = {
 }
 _DH_PROPERTY_KEYS = {"targetHumidity", "waterBucketLevel", "waterTankFull"}
 
+# Appliances are re-parsed on every poll, so inference warnings are logged once per appliance.
+_WARNED_APPLIANCE_IDS: set[str] = set()
+
+
+def _warn_once(appliance_id: str, message: str, *args: Any) -> None:
+    if appliance_id in _WARNED_APPLIANCE_IDS:
+        return
+    _WARNED_APPLIANCE_IDS.add(appliance_id)
+    _LOGGER.warning(message, *args)
+
 
 class Setting(str, Enum):
     """Writeable settings: names of Components accepted by the command endpoint."""
@@ -402,7 +412,8 @@ class Appliance:
             (_AC_PROPERTY_KEYS, Destination.AIR_CONDITIONER),
         ):
             if reported_keys & keys:
-                _LOGGER.warning(
+                _warn_once(
+                    self.appliance_id,
                     "Unknown appliance type '%s' for '%s' (%s) — inferred %s from reported properties. "
                     "Please report this at https://github.com/bm1549/frigidaire/issues",
                     self.appliance_type,
@@ -412,7 +423,8 @@ class Appliance:
                 )
                 return destination
 
-        _LOGGER.warning(
+        _warn_once(
+            self.appliance_id,
             "Unrecognized appliance type '%s' for '%s' (%s) — skipping. Reported keys: %s. "
             "Please report this at https://github.com/bm1549/frigidaire/issues",
             self.appliance_type,

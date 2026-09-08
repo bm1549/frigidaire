@@ -114,3 +114,12 @@ def test_appliance_missing_properties_key_does_not_crash() -> None:
     raw = {"applianceId": "X", "applianceData": {"modelName": "Mystery", "applianceName": "n"}}
     appliance = Appliance(raw)
     assert appliance.destination is None
+
+
+def test_inference_warning_is_logged_once_per_appliance(caplog: pytest.LogCaptureFixture) -> None:
+    """Snapshots are parsed on every poll; an unknown codename must not warn every 30 seconds."""
+    caplog.set_level(logging.WARNING)
+    for _ in range(3):
+        Appliance(_raw("UnknownCodename", appliance_id="SAME", reported={"targetHumidity": 50}))
+    Appliance(_raw("UnknownCodename", appliance_id="OTHER", reported={"targetHumidity": 50}))
+    assert caplog.text.count("inferred DEHUMIDIFIER") == 2
