@@ -1,5 +1,7 @@
 """Appliance commands encode the protocol quirks so callers do not have to."""
 
+from __future__ import annotations
+
 import json
 
 import pytest
@@ -33,6 +35,48 @@ def test_ac_set_mode_on_running_unit_sends_power_then_mode() -> None:
     client.set_mode(_ac(), Mode.FAN)
 
     assert _puts() == [{"executeCommand": "ON"}, {"mode": "FANONLY"}]
+
+
+@pytest.mark.parametrize("mode_name", ["HEAT", "COOL", "ECO"])
+@responses.activate
+def test_ac_set_mode_on_running_unit_preserves_requested_mode(mode_name: str) -> None:
+    client = make_authenticated_client()
+    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+
+    client.set_mode(_ac(targetTemperatureF=72), Mode[mode_name])
+
+    assert _puts() == [{"executeCommand": "ON"}, {"mode": mode_name}]
+
+
+@pytest.mark.parametrize("off_report", [{"applianceState": "off"}, {"mode": "off"}])
+@pytest.mark.parametrize(
+    "unit,target_key,target", [("fahrenheit", "targetTemperatureF", 72), ("celsius", "targetTemperatureC", 22)]
+)
+@responses.activate
+def test_ac_set_heat_from_off_restores_setpoint_last(off_report: dict, unit: str, target_key: str, target: int) -> None:
+    """Synthetic off snapshots exercise both off signals and each reported temperature unit."""
+    client = make_authenticated_client()
+    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+    appliance = _ac(**{**off_report, "temperatureRepresentation": unit, target_key: target})
+
+    client.set_mode(appliance, Mode.HEAT)
+
+    assert _puts() == [
+        {"executeCommand": "ON"},
+        {"mode": "HEAT"},
+        {"temperatureRepresentation": unit.upper()},
+        {target_key: target},
+    ]
+
+
+@responses.activate
+def test_ac_set_heat_from_off_without_setpoint_skips_it() -> None:
+    client = make_authenticated_client()
+    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+
+    client.set_mode(_ac(applianceState="OFF"), Mode.HEAT)
+
+    assert _puts() == [{"executeCommand": "ON"}, {"mode": "HEAT"}]
 
 
 @responses.activate

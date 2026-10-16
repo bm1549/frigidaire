@@ -219,6 +219,7 @@ class Mode(CaseInsensitiveEnum):
     # Air Conditioner
     OFF = "OFF"
     COOL = "COOL"
+    HEAT = "HEAT"
     FAN = "FANONLY"
     ECO = "ECO"
     # Dehumidifier
