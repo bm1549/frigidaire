@@ -1,10 +1,23 @@
 """Tests for Action factory methods."""
 
+from __future__ import annotations
+
 import json
 
 import pytest
 
-from frigidaire import Action, DisplayLight, FrigidaireException, Setting, Unit
+from frigidaire import Action, DisplayLight, FrigidaireException, Mode, Setting, Unit
+
+
+@pytest.mark.parametrize("mode_name", ["HEAT", "COOL", "ECO"])
+def test_set_mode_serializes_to_wire_value(mode_name: str) -> None:
+    mode = Mode[mode_name]
+    components = Action.set_mode(mode)
+
+    assert len(components) == 1
+    assert components[0].name == Setting.MODE.value
+    assert components[0].value is mode
+    assert json.dumps({components[0].name: components[0].value}) == json.dumps({"mode": mode_name})
 
 
 @pytest.mark.parametrize("humidity", [35, 50, 85])

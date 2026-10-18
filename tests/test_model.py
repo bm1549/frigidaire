@@ -1,5 +1,7 @@
 """Tests for the parsed appliance model: case-insensitive enums and Appliance accessors."""
 
+from __future__ import annotations
+
 import pytest
 
 from frigidaire import (
@@ -91,6 +93,18 @@ def test_state_and_modes_parse_lowercase_firmware_spellings() -> None:
     assert appliance.state is ApplianceState.RUNNING
     assert appliance.mode is Mode.ECO
     assert appliance.mode_state is Mode.FAN
+
+
+@pytest.mark.parametrize("wire_value", ["HEAT", "heat", "Heat"])
+def test_heat_mode_and_mode_state_parse_any_casing(wire_value: str) -> None:
+    """Synthetic Telica record using the reported HEAT wire vocabulary; no device identity."""
+    appliance = Appliance(_raw("Telica", reported={"mode": wire_value, "modeState": wire_value}))
+
+    assert appliance.mode is not None
+    assert appliance.mode is Mode.HEAT
+    assert appliance.mode_state is Mode.HEAT
+    assert Mode(wire_value) is Mode.HEAT
+    assert Mode.HEAT.value == "HEAT"
 
 
 def test_unknown_mode_is_none_but_raw_still_available() -> None:

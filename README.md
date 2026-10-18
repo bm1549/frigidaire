@@ -29,6 +29,10 @@ The `set_*` commands encode the protocol's ordering quirks (power-on before mode
 setpoint after a cold start, entering Dry mode before setting a humidity target), so callers only
 express intent.
 
+On heat-capable air conditioners, use `client.set_mode(ac, Mode.HEAT)`. Both `mode` and
+`mode_state` recognize `HEAT` regardless of firmware casing. Availability depends on the appliance;
+recognizing the wire value does not imply that every air conditioner supports heating.
+
 ## Sessions and the active-session cap
 
 Electrolux caps the number of active sessions per account (`cas_3403`). Pass a `session_store`
