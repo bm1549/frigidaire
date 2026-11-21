@@ -2,7 +2,8 @@
 
 Public exports only. Two clients share one appliance model and the same command plans:
 
-- ``AsyncFrigidaire(backend)``, the async client, over any :class:`Backend`::
+- ``AsyncFrigidaire(backend)``, the async client, over any :class:`Backend`: ``PasswordBackend``
+  (email and password) or ``ApiKeyBackend`` (the official API, beta)::
 
       client = AsyncFrigidaire(PasswordBackend("email", "password"))
       await client.connect()
@@ -16,9 +17,17 @@ Public exports only. Two clients share one appliance model and the same command 
 
 from __future__ import annotations
 
+from .backends.api_key import ApiKeyBackend
 from .backends.base import Backend
 from .client import AsyncFrigidaire
-from .exceptions import AuthenticationError, FrigidaireException, LoginError, SessionCapError
+from .exceptions import (
+    AuthenticationError,
+    CommandRejectedError,
+    FrigidaireException,
+    LoginError,
+    QuotaExceededError,
+    SessionCapError,
+)
 from .model import (
     Action,
     Alert,
@@ -71,12 +80,14 @@ from .backends.password.transport import (
 __all__ = [
     "Action",
     "Alert",
+    "ApiKeyBackend",
     "Appliance",
     "ApplianceState",
     "AsyncFrigidaire",
     "AuthenticationError",
     "Backend",
     "CaseInsensitiveEnum",
+    "CommandRejectedError",
     "Component",
     "ConnectionState",
     "Destination",
@@ -88,6 +99,7 @@ __all__ = [
     "LoginError",
     "Mode",
     "Power",
+    "QuotaExceededError",
     "SessionCapError",
     "Setting",
     "SleepMode",
