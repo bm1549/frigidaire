@@ -36,6 +36,19 @@ from .model import (
     SleepMode,
     Unit,
     VerticalSwing,
+    parse_appliances,
+    plan_set_clean_air_mode,
+    plan_set_display_light,
+    plan_set_fan_speed,
+    plan_set_humidity,
+    plan_set_mode,
+    plan_set_power,
+    plan_set_sleep_mode,
+    plan_set_start_time,
+    plan_set_stop_time,
+    plan_set_temperature,
+    plan_set_ui_lock,
+    plan_set_vertical_swing,
 )
 from .rate_limit import RateLimiter, wrap_session_request
 from .session_store import JsonFileSessionStore, SessionStore
@@ -465,19 +478,7 @@ class Frigidaire:
         """
         _LOGGER.debug("Listing appliances")
 
-        def fetch() -> list[Appliance]:
-            appliances = []
-            for record in self._fetch_raw_appliances():
-                try:
-                    appliance = Appliance(record)
-                except (KeyError, TypeError):
-                    _LOGGER.warning("Skipping malformed appliance record: %r", record)
-                    continue
-                if appliance.destination is not None:
-                    appliances.append(appliance)
-            return appliances
-
-        return self._with_reauth(fetch)
+        return self._with_reauth(lambda: parse_appliances(self._fetch_raw_appliances()))
 
     def execute_action(self, appliance: Appliance, action: list[Component]) -> None:
         """
@@ -497,78 +498,53 @@ class Frigidaire:
 
             self._with_reauth(send)
 
+    def _send_plan(self, appliance: Appliance, plan: list[list[Component]]) -> None:
+        for action in plan:
+            self.execute_action(appliance, action)
+
     # --- commands ---
     #
-    # These encode what the appliances actually need, so callers can express intent
-    # ("cool at 72") without knowing the protocol's ordering quirks.
+    # Each sends the plan of the same name from frigidaire.model, where the ordering quirks are
+    # documented, so callers can express intent ("cool at 72") without knowing the protocol.
 
     def set_power(self, appliance: Appliance, on: bool) -> None:
-        self.execute_action(appliance, Action.set_power(Power.ON if on else Power.OFF))
+        self._send_plan(appliance, plan_set_power(appliance, on))
 
     def set_mode(self, appliance: Appliance, mode: Mode) -> None:
-        """Select an operating mode, powering the appliance on first.
-
-        Air conditioners: power-on is always sent, because the cloud reports the desired state
-        rather than the hardware state. After a failed turn-on it keeps saying RUNNING, so
-        gating on it would skip the power command on every retry; power is a set, not a
-        toggle, so this is harmless on a unit that really is running. A unit that was off
-        forgets its setpoint and engaging the mode restores a default, so the remembered
-        setpoint is re-sent last. Mode.AUTO is a dehumidifier value that an AC silently
-        ignores; its energy-saving mode is ECO.
-        """
-        if mode is Mode.OFF:
-            self.execute_action(appliance, Action.set_mode(Mode.OFF))
-            return
-
-        if appliance.destination is Destination.AIR_CONDITIONER:
-            if mode is Mode.AUTO:
-                mode = Mode.ECO
-            was_off = appliance.state is ApplianceState.OFF or appliance.mode is Mode.OFF
-            self.set_power(appliance, True)
-            self.execute_action(appliance, Action.set_mode(mode))
-            target = appliance.target_temperature
-            if was_off and target is not None:
-                self.set_temperature(appliance, int(target))
-            return
-
-        if appliance.state is ApplianceState.OFF:
-            self.set_power(appliance, True)
-        self.execute_action(appliance, Action.set_mode(mode))
+        """Select an operating mode, powering the appliance on first; see :func:`~frigidaire.model.plan_set_mode`."""
+        self._send_plan(appliance, plan_set_mode(appliance, mode))
 
     def set_temperature(self, appliance: Appliance, temperature: int, unit: Unit | None = None) -> None:
         """Set the AC setpoint. Defaults to the unit the appliance reports in."""
-        unit = unit or appliance.temperature_unit or Unit.FAHRENHEIT
-        self.execute_action(appliance, Action.set_temperature(int(temperature), unit))
+        self._send_plan(appliance, plan_set_temperature(appliance, temperature, unit))
 
     def set_fan_speed(self, appliance: Appliance, fan_speed: FanSpeed) -> None:
-        self.execute_action(appliance, Action.set_fan_speed(fan_speed))
+        self._send_plan(appliance, plan_set_fan_speed(appliance, fan_speed))
 
     def set_humidity(self, appliance: Appliance, humidity: int) -> None:
         """Set the dehumidifier target. Snaps to 5% steps; the appliance only accepts a target in Dry mode."""
-        components = Action.set_humidity(5 * round(humidity / 5))
-        self.set_mode(appliance, Mode.DRY)
-        self.execute_action(appliance, components)
+        self._send_plan(appliance, plan_set_humidity(appliance, humidity))
 
     def set_sleep_mode(self, appliance: Appliance, on: bool) -> None:
-        self.execute_action(appliance, Action.set_sleep_mode(SleepMode.ON if on else SleepMode.OFF))
+        self._send_plan(appliance, plan_set_sleep_mode(appliance, on))
 
     def set_vertical_swing(self, appliance: Appliance, on: bool) -> None:
-        self.execute_action(appliance, Action.set_vertical_swing(VerticalSwing.ON if on else VerticalSwing.OFF))
+        self._send_plan(appliance, plan_set_vertical_swing(appliance, on))
 
     def set_ui_lock(self, appliance: Appliance, on: bool) -> None:
-        self.execute_action(appliance, Action.set_ui_lock_mode(on))
+        self._send_plan(appliance, plan_set_ui_lock(appliance, on))
 
     def set_display_light(self, appliance: Appliance, on: bool) -> None:
-        self.execute_action(appliance, Action.set_display_light(DisplayLight.ON if on else DisplayLight.OFF))
+        self._send_plan(appliance, plan_set_display_light(appliance, on))
 
     def set_clean_air_mode(self, appliance: Appliance, on: bool) -> None:
-        self.execute_action(appliance, Action.set_clean_air_mode(on))
+        self._send_plan(appliance, plan_set_clean_air_mode(appliance, on))
 
     def set_start_time(self, appliance: Appliance, seconds: int) -> None:
-        self.execute_action(appliance, Action.set_start_time(seconds))
+        self._send_plan(appliance, plan_set_start_time(appliance, seconds))
 
     def set_stop_time(self, appliance: Appliance, seconds: int) -> None:
-        self.execute_action(appliance, Action.set_stop_time(seconds))
+        self._send_plan(appliance, plan_set_stop_time(appliance, seconds))
 
     # --- HTTP ---
 
