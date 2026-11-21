@@ -18,7 +18,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/bm1549/frigidaire",
     packages=setuptools.find_packages(),
-    install_requires=["requests>=2.25.1"],
+    install_requires=["requests>=2.25.1", "electrolux-group-developer-sdk==0.7.0"],
     extras_require={
         "dev": [
             "pytest>=7.0",

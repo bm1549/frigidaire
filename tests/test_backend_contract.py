@@ -1,22 +1,24 @@
 """Every backend honours the Backend protocol the same way.
 
 Each case builds a backend serving the same two appliances, plus a way to read back what it sent.
-The password backend runs against ``responses``; the fake needs no mocking.
+The password backend runs against ``responses``, the API key backend against ``aioresponses``; the
+fake needs no mocking.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass, field
 
 import pytest
 import responses
 
-from frigidaire import Appliance, Backend, FrigidaireException, Mode, PasswordBackend
+from frigidaire import ApiKeyBackend, Appliance, Backend, FrigidaireException, Mode, PasswordBackend
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC, FakeBackend
 from tests.conftest import APPLIANCES_URL, NO_RATE_LIMIT, REGIONAL_URL, USERS_CURRENT_URL
+from tests.test_api_key_backend import ACCESS_TOKEN, SdkMock
 
 RECORDS = [LEGACY_AC, DEHUMIDIFIER]
 IDS = [r["applianceId"] for r in RECORDS]
@@ -28,6 +30,7 @@ class Case:
     backend: Backend
     sent: Callable[[], list[tuple[str, str, object]]]
     """Every (appliance_id, key, value) the backend has sent, in order."""
+    cleanup: Callable[[], None] = field(default=lambda: None)
 
 
 def _fake(live: bool) -> Case:
@@ -60,16 +63,30 @@ def _password() -> Case:
     return Case(backend, sent)
 
 
+def _api_key() -> Case:
+    sdk = SdkMock().start()
+    sdk.serve(RECORDS)
+    sdk.stream()
+    backend = ApiKeyBackend("api-key", ACCESS_TOKEN, "refresh-token")
+    backend.stream_initial_backoff = 60
+    return Case(backend, lambda: list(sdk.sent), sdk.stop)
+
+
 FACTORIES: dict[str, Callable[[], Case]] = {
     "fake": lambda: _fake(live=False),
     "fake-live": lambda: _fake(live=True),
     "password": _password,
+    "api_key": _api_key,
 }
 
 
 @pytest.fixture(params=list(FACTORIES))
-def case(request: pytest.FixtureRequest, http_mock: None) -> Case:
-    return FACTORIES[request.param]()
+def case(request: pytest.FixtureRequest, http_mock: None) -> Iterator[Case]:
+    built = FACTORIES[request.param]()
+    try:
+        yield built
+    finally:
+        built.cleanup()
 
 
 async def test_implements_the_protocol(case: Case) -> None:

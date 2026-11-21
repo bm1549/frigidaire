@@ -9,6 +9,7 @@ Public exports only. Start with :class:`Frigidaire` and a backend::
 
 from __future__ import annotations
 
+from .backends.api_key import ApiKeyBackend
 from .backends.base import Backend
 from .backends.password import JsonFileSessionStore, PasswordBackend, SessionStore
 from .client import Frigidaire
@@ -44,6 +45,7 @@ from .model import (
 __all__ = [
     "Action",
     "Alert",
+    "ApiKeyBackend",
     "Appliance",
     "ApplianceState",
     "AuthenticationError",
