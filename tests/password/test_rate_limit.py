@@ -4,7 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from frigidaire.rate_limit import RateLimiter, _parse_retry_after_seconds, wrap_session_request
+from frigidaire.backends.password.rate_limit import RateLimiter, _parse_retry_after_seconds, wrap_session_request
 
 # --- _parse_retry_after_seconds ---
 
@@ -38,8 +38,8 @@ class FakeClock:
 @pytest.fixture
 def clock(monkeypatch: pytest.MonkeyPatch) -> FakeClock:
     c = FakeClock()
-    monkeypatch.setattr("frigidaire.rate_limit.time.monotonic", c.monotonic)
-    monkeypatch.setattr("frigidaire.rate_limit.time.sleep", c.sleep)
+    monkeypatch.setattr("frigidaire.backends.password.rate_limit.time.monotonic", c.monotonic)
+    monkeypatch.setattr("frigidaire.backends.password.rate_limit.time.sleep", c.sleep)
     return c
 
 

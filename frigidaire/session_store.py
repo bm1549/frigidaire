@@ -1,49 +1,17 @@
-"""Persistence for the session key so a still-valid token survives process restarts.
+"""The 1.x import path of :mod:`frigidaire.backends.password.session_store`, kept through 1.x.
 
-Abandoning a valid session and minting a new one on every start leaves sessions lingering
-server-side until Electrolux's active-session cap (``cas_3403``) locks the account out.
+This name resolves to that module itself, so reading or patching anything through the old path,
+private names included, reaches the real module.
 """
 
 from __future__ import annotations
 
-import json
-import logging
-import threading
-from typing import Protocol
+import sys
 
-_LOGGER = logging.getLogger(__name__)
+from .backends.password import session_store as _module
+from .backends.password.session_store import (
+    JsonFileSessionStore as JsonFileSessionStore,
+    SessionStore as SessionStore,
+)
 
-
-class SessionStore(Protocol):
-    def load(self) -> tuple[str | None, str | None]:
-        """Return the stored ``(session_key, regional_base_url)``, or ``(None, None)``."""
-
-    def save(self, session_key: str, regional_base_url: str | None) -> None:
-        """Persist the session the client is currently using."""
-
-
-class JsonFileSessionStore:
-    """Stores the session in a small JSON file. Writes are serialised across threads."""
-
-    def __init__(self, path: str) -> None:
-        self._path = path
-        self._lock = threading.Lock()
-
-    def load(self) -> tuple[str | None, str | None]:
-        try:
-            with open(self._path) as f:
-                text = f.read()
-        except FileNotFoundError:
-            return None, None
-        if not text.strip():
-            return None, None
-        try:
-            obj = json.loads(text)
-        except json.JSONDecodeError:
-            _LOGGER.warning("Ignoring unreadable session file %s", self._path)
-            return None, None
-        return obj.get("session_key"), obj.get("regional_base_url")
-
-    def save(self, session_key: str, regional_base_url: str | None) -> None:
-        with self._lock, open(self._path, "w") as f:
-            json.dump({"session_key": session_key, "regional_base_url": regional_base_url}, f, indent=4)
+sys.modules[__name__] = _module

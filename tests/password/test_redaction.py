@@ -10,7 +10,8 @@ import logging
 
 import pytest
 
-from frigidaire import Frigidaire, FrigidaireException, _redact_headers, _redact_payload
+from frigidaire import FrigidaireException
+from frigidaire.backends.password.transport import PasswordTransport, _redact_headers, _redact_payload
 
 FAKE_JWT = "eyJhbGciOiJIUzI1NiJ9.test-payload.test-signature"
 FAKE_API_KEY = "test-api-key-do-not-leak"
@@ -73,7 +74,9 @@ def test_handle_request_exception_redacts_in_message_and_log(caplog: pytest.LogC
     payload = json.dumps({"loginID": "user@example.com", "password": FAKE_PASSWORD})
     caplog.set_level(logging.WARNING)
     with pytest.raises(FrigidaireException) as exc_info:
-        Frigidaire.handle_request_exception(RuntimeError("boom"), "POST", "https://example.com/login", headers, payload)
+        PasswordTransport.handle_request_exception(
+            RuntimeError("boom"), "POST", "https://example.com/login", headers, payload
+        )
 
     leaked = (FAKE_JWT, FAKE_API_KEY, FAKE_PASSWORD)
     for secret in leaked:
@@ -92,5 +95,5 @@ def test_handle_request_exception_does_not_log_inner_exception_unredacted(
     inner = FrigidaireException(f'Request failed with status 200: b\'{{"id_token": "{FAKE_JWT}"}}\'')
     caplog.set_level(logging.WARNING)
     with pytest.raises(FrigidaireException):
-        Frigidaire.handle_request_exception(inner, "POST", "https://example.com/jwt", {}, "")
+        PasswordTransport.handle_request_exception(inner, "POST", "https://example.com/jwt", {}, "")
     assert FAKE_JWT not in caplog.text, "inner exception leaked a token into the warning log"
