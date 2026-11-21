@@ -226,3 +226,50 @@ def test_get_appliances_raw_returns_fresh_state_each_call() -> None:
     responses.add(responses.GET, APPLIANCES_URL, json=[make_raw_appliance(reported={"mode": "OFF"})], status=200)
     assert client.get_appliances_raw()[0]["properties"]["reported"]["mode"] == "COOL"
     assert client.get_appliances_raw()[0]["properties"]["reported"]["mode"] == "OFF"
+
+
+@responses.activate
+def test_send_command_retry_after_reauth_carries_the_new_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: the PUT headers were built once, so the retry after re-auth reused the old token."""
+    client = make_authenticated_client()
+    sent: list[str] = []
+
+    def reauth() -> None:
+        client.session_key = "new-key"
+
+    monkeypatch.setattr(client, "_re_authenticate", reauth)
+
+    def put(request: object) -> tuple[int, dict, bytes]:
+        authorization = request.headers["Authorization"]  # type: ignore[attr-defined]
+        sent.append(authorization)
+        return (401, {}, b'{"error":"unauthorized"}') if authorization == "Bearer valid-key" else (200, {}, b"{}")
+
+    responses.add_callback(responses.PUT, f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command", callback=put)
+
+    client.send_command("AC1", "executeCommand", "ON")
+
+    assert sent == ["Bearer valid-key", "Bearer valid-key", "Bearer new-key"]
+
+
+@responses.activate
+def test_send_command_uses_a_session_another_thread_just_minted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A retry picks up a session another request re-authenticated meanwhile, without minting one."""
+    client = make_authenticated_client()
+    reauths: list[bool] = []
+    sent: list[str] = []
+    monkeypatch.setattr(client, "_re_authenticate", lambda: reauths.append(True))
+
+    def put(request: object) -> tuple[int, dict, bytes]:
+        authorization = request.headers["Authorization"]  # type: ignore[attr-defined]
+        sent.append(authorization)
+        if authorization == "Bearer valid-key":
+            client.session_key = "from-other-thread"  # the poll re-authenticated meanwhile
+            return (401, {}, b"{}")
+        return (200, {}, b"{}")
+
+    responses.add_callback(responses.PUT, f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command", callback=put)
+
+    client.send_command("AC1", "executeCommand", "ON")
+
+    assert sent == ["Bearer valid-key", "Bearer from-other-thread"]
+    assert reauths == []

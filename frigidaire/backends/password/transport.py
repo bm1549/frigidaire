@@ -428,10 +428,11 @@ class PasswordTransport:
         :param value: The property value
         """
         path = f"/appliance/api/v2/appliances/{appliance_id}/command"
-        headers = self.get_headers_frigidaire("PUT", include_bearer_token=True)
         data = {key: value}
 
         def send() -> None:
+            # Built on every attempt, so a retry after re-authentication carries the new session.
+            headers = self.get_headers_frigidaire("PUT", include_bearer_token=True)
             self.put_request(self.regional_base_url, path, headers, data)
 
         self._with_reauth(send)
