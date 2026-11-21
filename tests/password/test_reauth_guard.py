@@ -6,7 +6,7 @@ import pytest
 import responses
 
 from frigidaire import FrigidaireException
-from tests.conftest import make_authenticated_client
+from tests.password.helpers import make_authenticated_client
 
 
 @responses.activate

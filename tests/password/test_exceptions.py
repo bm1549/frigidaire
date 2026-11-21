@@ -10,12 +10,12 @@ from frigidaire import (
     SessionCapError,
 )
 from frigidaire.backends.password.transport import PasswordTransport
-from tests.conftest import APPLIANCES_URL, IDENTITY_DOMAIN, NO_RATE_LIMIT, make_authenticated_client
-from tests.test_authenticate import _stub_full_auth
+from tests.password.helpers import APPLIANCES_URL, IDENTITY_DOMAIN, NO_RATE_LIMIT, make_authenticated_client
+from tests.password.test_authenticate import _stub_full_auth
 
 
 def test_session_cap_is_a_typed_exception() -> None:
-    from tests.test_parse_response import _resp
+    from tests.password.test_parse_response import _resp
 
     r = _resp(429, b'{"error":"cas_3403"}', json_data={"error": "cas_3403"})
     with pytest.raises(SessionCapError) as exc_info:
@@ -105,7 +105,7 @@ def test_authentication_error_is_a_frigidaire_exception() -> None:
 @responses.activate
 def test_session_cap_while_testing_the_session_is_not_retried_with_a_new_login() -> None:
     """Minting a new session in response to the cap is what makes the cap worse."""
-    from tests.conftest import REGIONAL_URL, USERS_CURRENT_URL
+    from tests.password.helpers import REGIONAL_URL, USERS_CURRENT_URL
 
     responses.add(responses.GET, USERS_CURRENT_URL, json={"error": "cas_3403"}, status=429)
     _stub_full_auth()

@@ -14,7 +14,8 @@ import responses
 from frigidaire import Action, FrigidaireException, Mode, Power
 from frigidaire.backends.password.transport import PasswordTransport
 from frigidaire.model import Component
-from tests.conftest import APPLIANCES_URL, REGIONAL_URL, make_authenticated_client, make_raw_appliance
+from tests.conftest import make_raw_appliance
+from tests.password.helpers import APPLIANCES_URL, REGIONAL_URL, make_authenticated_client
 
 
 def _send(client: PasswordTransport, action: list[Component], appliance_id: str = "AC1") -> None:

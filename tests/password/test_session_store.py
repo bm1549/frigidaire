@@ -6,8 +6,8 @@ import responses
 
 from frigidaire import JsonFileSessionStore
 from frigidaire.backends.password.transport import PasswordTransport
-from tests.conftest import NO_RATE_LIMIT, REGIONAL_URL, USERS_CURRENT_URL
-from tests.test_authenticate import _stub_full_auth
+from tests.password.helpers import NO_RATE_LIMIT, REGIONAL_URL, USERS_CURRENT_URL
+from tests.password.test_authenticate import _stub_full_auth
 
 
 def test_missing_file_loads_nothing(tmp_path: Path) -> None:

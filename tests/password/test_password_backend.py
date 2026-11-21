@@ -23,8 +23,8 @@ from frigidaire import (
     SessionCapError,
 )
 from frigidaire.testing import DEHUMIDIFIER, LEGACY_AC
-from tests.conftest import APPLIANCES_URL, IDENTITY_DOMAIN, NO_RATE_LIMIT, REGIONAL_URL, USERS_CURRENT_URL
-from tests.test_authenticate import _stub_full_auth
+from tests.password.helpers import APPLIANCES_URL, IDENTITY_DOMAIN, NO_RATE_LIMIT, REGIONAL_URL, USERS_CURRENT_URL
+from tests.password.test_authenticate import _stub_full_auth
 
 pytestmark = pytest.mark.usefixtures("http_mock")
 

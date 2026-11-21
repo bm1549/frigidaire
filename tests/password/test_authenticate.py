@@ -9,7 +9,7 @@ import responses
 
 from frigidaire import AuthenticationError, FrigidaireException
 from frigidaire.backends.password.transport import PasswordTransport
-from tests.conftest import (
+from tests.password.helpers import (
     FAKE_SESSION_SECRET,
     GLOBAL_URL,
     IDENTITY_DOMAIN,
