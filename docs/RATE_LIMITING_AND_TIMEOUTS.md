@@ -1,6 +1,6 @@
 # Rate Limiting & Default Timeouts
 
-The client throttles mutating requests and applies a default HTTP timeout. Both are on by default.
+The password backend throttles mutating requests and applies a default HTTP timeout. Both are on by default.
 
 - **Write call smoothing:** Mutating HTTP verbs (`POST`, `PUT`, `PATCH`, `DELETE`) are spaced out to avoid server lockouts (`cas_3403`).
 - **Retry-After aware:** `429/423` responses back off, honoring `Retry-After` (capped).
@@ -9,16 +9,16 @@ The client throttles mutating requests and applies a default HTTP timeout. Both 
 ## Quickstart
 
 ```python
-from frigidaire import Frigidaire
+from frigidaire import Frigidaire, PasswordBackend
 
-api = Frigidaire("username", "password")
-devices = api.get_appliances()
-print(devices)
+client = Frigidaire(PasswordBackend("username", "password"))
+await client.connect()
+print(await client.get_appliances())
 ```
 
 ## Customization
 
-All tunables are optional kwargs on `Frigidaire(...)`:
+All tunables are optional kwargs on `PasswordBackend(...)`:
 
 - `timeout`: per-request HTTP timeout in seconds; default `15.0`
 - `rate_limit_min_interval`: seconds between write requests; default `1.25`
@@ -31,7 +31,7 @@ All tunables are optional kwargs on `Frigidaire(...)`:
 **Example:**
 
 ```python
-api = Frigidaire(
+backend = PasswordBackend(
     "username",
     "password",
     timeout=20.0,
