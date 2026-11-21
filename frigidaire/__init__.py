@@ -487,11 +487,12 @@ class Frigidaire:
         :param action: The components to send
         """
         path = f"/appliance/api/v2/appliances/{appliance.appliance_id}/command"
-        headers = self.get_headers_frigidaire("PUT", include_bearer_token=True)
         for component in action:
             data = {component.name: component.value}
 
             def send(data: dict = data) -> None:
+                # Built per attempt: a retry after re-authentication must carry the new session key.
+                headers = self.get_headers_frigidaire("PUT", include_bearer_token=True)
                 self.put_request(self.regional_base_url, path, headers, data)
 
             self._with_reauth(send)
