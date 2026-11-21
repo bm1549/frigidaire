@@ -86,9 +86,10 @@ class Backend(Protocol):
         on_disconnect: ConnectionCallback,
     ) -> None:
         """Stream live updates until cancelled, passing each appliance's full updated record to
-        ``on_record``. Calls ``on_connect`` each time the stream (re)connects and ``on_disconnect``
-        each time it drops. Raises ``NotImplementedError`` when ``supports_live_updates`` is
-        ``False``."""
+        ``on_record``. Calls ``on_connect`` each time the stream (re)connects, once it is known to
+        deliver, and ``on_disconnect`` each time a connected stream drops; an attempt that fails
+        before delivering calls neither. Raises ``NotImplementedError`` when
+        ``supports_live_updates`` is ``False``."""
 
     async def close(self) -> None:
         """Release connections. The backend is not used afterwards."""

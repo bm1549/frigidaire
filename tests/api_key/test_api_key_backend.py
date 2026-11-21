@@ -40,7 +40,10 @@ from tests.api_key.helpers import (
     REFRESH_TOKEN,
     REFRESH_URL,
     STATE_URL,
+    STREAM_EVENT,
+    STREAM_URL,
     SdkMock,
+    _StreamResponse,
     info_payload,
     list_item,
     make_backend,
@@ -125,6 +128,23 @@ async def test_info_failure_still_builds_the_record_and_is_retried(
     assert first["properties"]["reported"] == DEHUMIDIFIER["properties"]["reported"]
     assert second["applianceData"]["applianceInfo"]["serialNumber"] == "SN-DH-1"
     assert "Could not read the info of appliance DH-1" in caplog.text
+
+
+async def test_every_state_failing_is_a_failed_fetch_not_an_empty_account(sdk: SdkMock) -> None:
+    for record in (LEGACY_AC, DEHUMIDIFIER):
+        sdk.add("GET", STATE_URL.format(record["applianceId"]), status=500, payload={"error": "boom"})
+    sdk.serve([LEGACY_AC, DEHUMIDIFIER])
+
+    with pytest.raises(FrigidaireException) as err:
+        await make_backend().fetch_records()
+    assert type(err.value) is FrigidaireException
+    assert err.value.status_code == 500
+
+
+async def test_an_account_without_appliances_is_empty(sdk: SdkMock) -> None:
+    sdk.serve([])
+
+    assert await make_backend().fetch_records() == []
 
 
 async def test_appliance_whose_state_fails_is_skipped_with_a_warning(
@@ -246,6 +266,62 @@ async def test_rejected_refresh_is_an_authentication_error(sdk: SdkMock) -> None
         assert "SECRET" not in str(err.value)
 
 
+@pytest.mark.parametrize(
+    "failure",
+    [
+        {"exception": aiohttp.ClientConnectionError("unreachable")},
+        {"exception": asyncio.TimeoutError()},
+        {"status": 503, "payload": {"detail": "SECRET-BODY"}},
+        {"status": 502, "body": "<html>SECRET-BODY</html>", "content_type": "application/json"},
+    ],
+    ids=["unreachable", "timeout", "server-error", "no-status"],
+)
+async def test_refresh_without_a_verdict_is_transient_and_keeps_the_refresh_token(
+    sdk: SdkMock, failure: dict[str, Any]
+) -> None:
+    rotated = make_jwt(3600)
+    sdk.add("POST", REFRESH_URL, **failure)
+    sdk.add("POST", REFRESH_URL, payload={"accessToken": rotated, "refreshToken": "refresh-SECRET-2"})
+    sdk.serve([LEGACY_AC])
+    seen: list[tuple[str, str]] = []
+    backend = make_backend(make_jwt(30), on_tokens=lambda access, refresh: seen.append((access, refresh)))
+
+    with pytest.raises(FrigidaireException) as err:
+        await backend.connect()
+    assert type(err.value) is FrigidaireException
+    assert "SECRET" not in str(err.value)
+    assert seen == []
+
+    await backend.connect()  # the next attempt refreshes with the same refresh token
+    assert seen == [(rotated, "refresh-SECRET-2")]
+    assert [c.kwargs["json"] for c in sdk.calls("POST", REFRESH_URL)] == [{"refreshToken": REFRESH_TOKEN}] * 2
+
+
+@pytest.mark.parametrize("status", [400, 401, 403])
+@pytest.mark.parametrize("operation", ["connect", "fetch_records", "account_email", "fetch_record", "send"])
+async def test_refresh_rejected_by_the_token_endpoint_carries_its_status(
+    sdk: SdkMock, status: int, operation: str
+) -> None:
+    sdk.add("POST", REFRESH_URL, status=status, payload={"detail": "SECRET-BODY"}, repeat=True)
+    sdk.serve([LEGACY_AC])
+    backend = make_backend(make_jwt(30))
+    backend._appliances = {"AC-LEGACY-1": list_item(LEGACY_AC)}
+
+    with pytest.raises(AuthenticationError) as err:
+        await OPERATIONS[operation][2](backend)
+    assert err.value.status_code == status
+    assert "SECRET" not in str(err.value)
+
+
+async def test_refresh_hitting_the_quota_is_quota_exceeded(sdk: SdkMock) -> None:
+    sdk.add("POST", REFRESH_URL, status=429, headers={"Retry-After": "30"}, repeat=True)
+    sdk.serve([LEGACY_AC])
+
+    with pytest.raises(QuotaExceededError) as err:
+        await make_backend(make_jwt(30)).fetch_records()
+    assert err.value.retry_after == 30.0
+
+
 async def test_access_token_that_is_not_a_jwt_is_an_authentication_error(sdk: SdkMock) -> None:
     sdk.serve([LEGACY_AC])
 
@@ -266,6 +342,46 @@ async def test_tokens_and_auth_bodies_stay_out_of_logs(sdk: SdkMock, caplog: pyt
 
     assert "Response from" in caplog.text  # the SDK's debug logging ran
     for secret in (rotated, "refresh-SECRET-2", REFRESH_TOKEN, API_KEY, "SECRET-BODY"):
+        assert secret not in caplog.text
+
+
+async def test_response_bodies_and_sdk_error_text_stay_out_of_logs(
+    sdk: SdkMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Appliance endpoints: an auth failure, a server error and a quota failure, each with a body.
+    sdk.add("GET", APPLIANCES_URL, status=401, payload={"detail": "BODY-401-MARKER"})
+    sdk.add("GET", EMAIL_URL, status=403, payload={"detail": "BODY-403-MARKER"})
+    sdk.add("GET", STATE_URL.format("DH-1"), status=500, payload={"detail": "BODY-500-MARKER"})
+    sdk.add("PUT", COMMAND_URL.format("DH-1"), status=429, body="BODY-429-MARKER", repeat=True)
+    # Successful bodies: the account email and serial numbers.
+    sdk.serve([LEGACY_AC, DEHUMIDIFIER], email="private-MARKER@example.com")
+    # The stream: its URL, and a payload the SDK cannot decode.
+    sdk.add(
+        "GET",
+        STREAM_URL,
+        body=b"data: not-json-MARKER\n\n",
+        content_type="text/event-stream",
+        response_class=_StreamResponse,
+    )
+    caplog.set_level(logging.DEBUG)
+    backend = make_backend()
+
+    with pytest.raises(AuthenticationError):
+        await backend.connect()
+    with pytest.raises(AuthenticationError):
+        await backend.account_email()
+    assert await backend.account_email() == "private-MARKER@example.com"
+    await backend.fetch_records()  # DH-1 is skipped
+    with pytest.raises(QuotaExceededError):
+        await backend.send("DH-1", "targetHumidity", 50)
+    backend.stream_initial_backoff = 60
+    task = asyncio.create_task(backend.listen(lambda r: None, lambda: None, lambda: None))
+    await _wait_for(lambda: "Reconnecting SSE stream" in caplog.text)
+    await _stop(task)
+
+    for logged in ("Response from", "Test connection failed", "Failed to decode SSE JSON"):
+        assert logged in caplog.text  # the SDK did log
+    for secret in ("MARKER", "SN-AC-LEGACY-1", STREAM_URL, API_KEY, ACCESS_TOKEN, REFRESH_TOKEN):
         assert secret not in caplog.text
 
 
@@ -438,7 +554,7 @@ async def test_stream_with_rejected_tokens_raises_authentication_error(sdk: SdkM
 
 async def test_stream_stops_listening_when_cancelled_or_closed(sdk: SdkMock) -> None:
     sdk.serve([LEGACY_AC])
-    sdk.stream()
+    sdk.stream(STREAM_EVENT)
     backend = make_backend()
     backend.stream_initial_backoff = 60
     connected = asyncio.Event()
@@ -449,6 +565,79 @@ async def test_stream_stops_listening_when_cancelled_or_closed(sdk: SdkMock) -> 
     await _stop(task)
     assert not backend._client._sse_listeners
     await backend.close()
+
+
+async def test_stream_answering_with_an_http_error_never_counts_as_connected(sdk: SdkMock) -> None:
+    # The SDK runs its opening callbacks before it looks at the response and hides the status.
+    sdk.serve([LEGACY_AC])
+    for _ in range(3):
+        sdk.add("GET", STREAM_URL, status=401, payload={"detail": "SECRET-BODY"})
+    backend = make_backend()
+    backend.stream_initial_backoff = 0.01
+    backend.stream_max_backoff = 0.02
+    backend.stream_confirm_after = 0.05
+    events: list[str] = []
+    task = asyncio.create_task(
+        backend.listen(lambda r: None, lambda: events.append("connect"), lambda: events.append("disconnect"))
+    )
+    await _wait_for(lambda: len(sdk.calls("GET", STREAM_URL)) >= 3)
+    await asyncio.sleep(0.1)  # past stream_confirm_after
+
+    assert events == []
+    assert not task.done()  # still reconnecting, with backoff
+    await _stop(task)
+    assert events == []
+
+
+async def test_stream_that_stays_open_without_events_counts_as_connected(sdk: SdkMock) -> None:
+    sdk.serve([LEGACY_AC])
+    sdk.stream(stay_open=True)
+    backend = make_backend()
+    backend.stream_confirm_after = 0.05
+    events: list[str] = []
+    task = asyncio.create_task(
+        backend.listen(lambda r: None, lambda: events.append("connect"), lambda: events.append("disconnect"))
+    )
+    await _wait_for(lambda: events == ["connect"])
+
+    await _stop(task)
+    assert events == ["connect", "disconnect"]
+
+
+async def test_first_stream_event_counts_as_connected_before_it_is_delivered(sdk: SdkMock) -> None:
+    sdk.serve([LEGACY_AC])
+    sdk.stream({"applianceId": "AC-LEGACY-1", "property": "mode", "value": "HEAT"}, stay_open=True)
+    backend = make_backend()
+    backend.stream_confirm_after = 60
+    events: list[str] = []
+    task = asyncio.create_task(
+        backend.listen(
+            lambda r: events.append(f"record {Appliance(r).mode}"),
+            lambda: events.append("connect"),
+            lambda: events.append("disconnect"),
+        )
+    )
+    await _wait_for(lambda: len(events) == 2)
+
+    assert events == ["connect", f"record {Mode.HEAT}"]
+    await _stop(task)
+
+
+async def test_stream_keeps_reconnecting_through_a_network_failure_while_refreshing(sdk: SdkMock) -> None:
+    sdk.add("POST", REFRESH_URL, exception=aiohttp.ClientConnectionError("unreachable"), repeat=True)
+    sdk.serve([LEGACY_AC])
+    backend = make_backend()
+    await backend.fetch_records()  # with a valid token; then it expires
+    backend._token_manager._auth_data = backend._token_manager._auth_data.__class__(
+        make_jwt(30), REFRESH_TOKEN, API_KEY
+    )
+    backend.stream_initial_backoff = 0.01
+    backend.stream_max_backoff = 0.02
+    task = asyncio.create_task(backend.listen(lambda r: None, lambda: None, lambda: None))
+    await _wait_for(lambda: len(sdk.calls("POST", REFRESH_URL)) >= 2)
+
+    assert not task.done()  # a refresh that got no answer is not rejected tokens
+    await _stop(task)
 
 
 async def _wait_for(condition: Callable[[], bool], timeout: float = 5.0) -> None:

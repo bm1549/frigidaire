@@ -21,15 +21,18 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any, TypeVar
 
+import aiohttp
 import jwt
 from electrolux_group_developer_sdk.auth.auth_data import AuthData
 from electrolux_group_developer_sdk.auth.invalid_credentials_exception import InvalidCredentialsException
 from electrolux_group_developer_sdk.auth.invalid_token_exception import InvalidTokenException
 from electrolux_group_developer_sdk.auth.token_manager import TokenManager
 from electrolux_group_developer_sdk.auth.token_refresh_failed import TokenRefreshFailedException
+from electrolux_group_developer_sdk.client import client_util
 from electrolux_group_developer_sdk.client.appliance_client import ApplianceClient, apply_sse_update
 from electrolux_group_developer_sdk.client.bad_credentials_exception import BadCredentialsException
 from electrolux_group_developer_sdk.client.dto.appliance_state import ApplianceState
+from electrolux_group_developer_sdk.config import TOKEN_REFRESH_URL
 
 from ...exceptions import AuthenticationError, CommandRejectedError, FrigidaireException, QuotaExceededError
 from ..base import ConnectionCallback, RecordCallback
@@ -57,40 +60,95 @@ _AUTH_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 
-class _SdkLogRedactor(logging.Filter):
-    """Keeps tokens and token-endpoint response bodies out of the SDK's own log lines.
+_REDACTED = "<redacted>"
 
-    The SDK logs every response body at debug level, including the token refresh response that
-    carries the new tokens, and logs refresh failures with the response body in the message.
+# Every SDK module that logs. Filters on a parent logger do not see its children's records, so
+# each gets the filter itself.
+_SDK_LOGGERS = (
+    "electrolux_group_developer_sdk.client.client_util",
+    "electrolux_group_developer_sdk.client.appliance_client",
+    "electrolux_group_developer_sdk.auth.token_manager",
+)
+
+# SDK messages whose arguments are a response body, a stream payload or the stream's URL.
+_BODY_MESSAGES = ("Failed to decode SSE JSON", "Received SSE event without", "Connected to SSE stream at")
+
+
+def _describe(exc: BaseException) -> str:
+    """An exception as its type name and HTTP status: SDK exception text can be a response body."""
+    if isinstance(exc, FrigidaireException):
+        return str(exc)  # this library's own messages never carry bodies or secrets
+    status = next((s for s in map(_status_of, _chain(exc)) if s is not None), None)
+    return type(exc).__name__ if status is None else f"{type(exc).__name__} (HTTP {status})"
+
+
+class _SdkLogRedactor(logging.Filter):
+    """Keeps API response bodies, tokens and SDK exception text out of the SDK's own log lines.
+
+    The SDK logs every response body at debug level: the token refresh response carries the new
+    tokens, the others the account email, serial numbers and the stream's URL. It logs failures with
+    exceptions whose text is the response body, including bodies of rejected credentials. Here
+    response bodies and stream payloads become ``<redacted>`` and exceptions become their type name
+    and HTTP status.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.msg
         if not isinstance(msg, str):
             return True
+        if " Body: " in msg:  # "Request failed after 3 attempts. Status: 429, Body: ..." (an f-string)
+            record.msg = msg.split(" Body: ", 1)[0] + " Body: " + _REDACTED
         args = record.args
-        if msg.startswith("Response from") and isinstance(args, tuple) and len(args) == 3:
-            if "/token/" in str(args[0]):
-                record.args = (args[0], args[1], "<redacted>")
-        elif msg.startswith(("Error during token refresh", "Error during token revoke")) and isinstance(args, tuple):
-            record.args = tuple(type(arg).__name__ if isinstance(arg, BaseException) else arg for arg in args)
-        elif msg.startswith("Request failed after") and " Body: " in msg:
-            record.msg = msg.split(" Body: ", 1)[0] + " Body: <redacted>"
+        if not isinstance(args, tuple) or not args:
+            return True
+        if msg.startswith("Response from") and len(args) == 3:  # url, status, body
+            args = (args[0], args[1], _REDACTED)
+        elif msg.startswith("SSE HTTP error") and len(args) == 2:  # status, message (the body)
+            args = (args[0], _REDACTED)
+        elif msg.startswith(_BODY_MESSAGES):
+            args = tuple(_REDACTED for _ in args)
+        record.args = tuple(_describe(arg) if isinstance(arg, BaseException) else arg for arg in args)
         return True
 
 
 _REDACTOR = _SdkLogRedactor()
-for _name in ("electrolux_group_developer_sdk.client.client_util", "electrolux_group_developer_sdk.auth.token_manager"):
+for _name in _SDK_LOGGERS:
     _sdk_logger = logging.getLogger(_name)
     if _REDACTOR not in _sdk_logger.filters:
         _sdk_logger.addFilter(_REDACTOR)
 
 
+def _refresh_error(exc: aiohttp.ClientResponseError) -> FrigidaireException:
+    """The library error for an error answer from the token endpoint."""
+    status = exc.status
+    if status == 429:
+        return QuotaExceededError(
+            "The Electrolux API request quota is used up (refresh the access token)",
+            retry_after=_retry_after([exc]),
+            status_code=status,
+        )
+    if 400 <= status < 500:
+        return AuthenticationError(
+            f"The Electrolux API rejected the refresh token (HTTP {status}); new tokens are needed",
+            status_code=status,
+        )
+    # A server error, or an answer that was not the JSON it claimed to be: try again later.
+    return FrigidaireException(
+        f"Could not refresh the Electrolux access token: {type(exc).__name__}, HTTP {status}", status_code=status
+    )
+
+
 class _TokenManager(TokenManager):
-    """The SDK's token manager, with refreshes serialised.
+    """The SDK's token manager, with refreshes serialised and their failures told apart.
 
     A refresh token works once. Without the lock, two requests that find the access token
     expired at the same moment would both refresh, and the second would fail.
+
+    The SDK's own refresh catches every error and reports a failed refresh the same way whatever
+    the cause, so a network outage looked like rejected tokens. Here a refresh that got no answer
+    raises ``FrigidaireException`` (try again later; the refresh token was not spent), and an error
+    answer from the token endpoint raises ``AuthenticationError`` with its status (new tokens are
+    needed), except 429 (``QuotaExceededError``) and server errors (``FrigidaireException``).
     """
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -100,6 +158,29 @@ class _TokenManager(TokenManager):
     async def get_auth_data(self) -> AuthData:
         async with self._refresh_lock:
             return await super().get_auth_data()
+
+    async def refresh_token(self) -> bool:
+        auth_data = self._auth_data
+        if not auth_data or auth_data.refresh_token is None:
+            raise InvalidCredentialsException("Missing refresh token")
+        try:
+            data = await client_util.request(
+                method="POST", url=TOKEN_REFRESH_URL, json_body={"refreshToken": auth_data.refresh_token}
+            )
+        except aiohttp.ClientResponseError as exc:
+            raise _refresh_error(exc) from None
+        except Exception as exc:
+            # No answer (connection, DNS, timeout), or an error answer whose body was not JSON,
+            # which the SDK reports without its status.
+            raise FrigidaireException(
+                f"Could not refresh the Electrolux access token: {type(exc).__name__}, no HTTP status"
+            ) from None
+        try:
+            access_token, refresh_token = data["accessToken"], data["refreshToken"]
+        except (KeyError, TypeError):
+            raise FrigidaireException("The Electrolux token endpoint answered without new tokens") from None
+        self.update(access_token=access_token, refresh_token=refresh_token, api_key=auth_data.api_key)
+        return True
 
 
 def _chain(exc: BaseException) -> list[BaseException]:
@@ -149,9 +230,11 @@ def _map_error(exc: BaseException, action: str) -> FrigidaireException:
     JSON. So the whole chain is searched, and a missing status falls through to
     ``FrigidaireException``. Messages never include the SDK's, which can carry response bodies.
     """
-    if isinstance(exc, FrigidaireException):
-        return exc
     chain = _chain(exc)
+    # This backend's own errors, such as a failed token refresh, can reach here wrapped in SDK ones.
+    for error in chain:
+        if isinstance(error, FrigidaireException):
+            return error
     status = next((s for s in map(_status_of, chain) if s is not None), None)
 
     if status in (401, 403) or any(isinstance(e, _AUTH_ERRORS) for e in chain):
@@ -208,6 +291,8 @@ class ApiKeyBackend:
     """Seconds before the event stream's first reconnection attempt; doubles on each failure."""
     stream_max_backoff: float = 120.0
     """The most seconds between event stream reconnection attempts."""
+    stream_confirm_after: float = 10.0
+    """Seconds an event stream connection must stay open to count as connected without an event."""
 
     def __init__(
         self,
@@ -229,6 +314,7 @@ class ApiKeyBackend:
         self._info: dict[str, dict[str, Any]] = {}  # info calls, by id, cached for good
         self._states: dict[str, ApplianceState] = {}  # the raw SDK state, by id
         self._on_record: RecordCallback | None = None
+        self._on_stream_data: Callable[[], None] | None = None
         self._listeners: dict[str, Callable[[dict[str, Any]], None]] = {}
 
     def __repr__(self) -> str:
@@ -265,17 +351,31 @@ class ApiKeyBackend:
         return email_address.email
 
     async def fetch_records(self) -> list[dict]:
+        """Every appliance on the account, skipping one whose state cannot be read this time.
+
+        Raises when the account has appliances but none of their states could be read, so a
+        caller sees a failed fetch rather than an empty account.
+        """
+        appliance_ids = await self._list()
         records = []
-        for appliance_id in await self._list():
+        failure: FrigidaireException | None = None
+        for appliance_id in appliance_ids:
             await self._ensure_info(appliance_id)
             try:
                 await self._fetch_state(appliance_id)
             except (AuthenticationError, QuotaExceededError):
                 raise
             except FrigidaireException as exc:
-                _LOGGER.warning("Skipping appliance %s: its state could not be read (%s)", appliance_id, exc)
+                failure = exc
+                _LOGGER.warning(
+                    "Skipping appliance %s this time: its state could not be read; will retry (%s)", appliance_id, exc
+                )
                 continue
             records.append(self._record(appliance_id))
+        if failure is not None and not records:
+            raise FrigidaireException(
+                f"Could not read the state of any appliance on the account ({failure})", status_code=failure.status_code
+            )
         return records
 
     async def fetch_record(self, appliance_id: str) -> dict:
@@ -301,23 +401,54 @@ class ApiKeyBackend:
         """Run the SDK's event stream until cancelled, reconnecting with backoff when it drops.
 
         Each event is applied to the appliance's raw state with the SDK's ``apply_sse_update`` and
-        the rebuilt record goes to ``on_record``. ``on_disconnect`` is called only after an
-        ``on_connect``. Raises ``AuthenticationError`` when the stream fails because the API key or
-        tokens were rejected; other failures reconnect.
+        the rebuilt record goes to ``on_record``.
+
+        A connection counts as connected, and ``on_connect`` is called, once it delivers its first
+        event or has stayed open for :attr:`stream_confirm_after` seconds. The SDK reports a
+        connection as open before it looks at the response, and does not expose the HTTP status,
+        so a stream URL that answers with an HTTP error (such as 401 or 403) cannot be told apart
+        from a stream that drops at once: neither counts as connected, and the SDK keeps
+        reconnecting with backoff up to :attr:`stream_max_backoff` without any ``on_connect`` or
+        ``on_disconnect``. ``on_disconnect`` is called only after an ``on_connect``, including on
+        cancellation.
+
+        Raises ``AuthenticationError`` when the API key or tokens are rejected, which shows when
+        the stream fetches its configuration or refreshes the access token before each attempt;
+        other failures reconnect.
         """
         if not self._states:
             await self.fetch_records()
 
-        auth_failure: asyncio.Future[AuthenticationError] = asyncio.get_running_loop().create_future()
+        loop = asyncio.get_running_loop()
+        auth_failure: asyncio.Future[AuthenticationError] = loop.create_future()
         connected = False
+        confirm_timer: asyncio.TimerHandle | None = None
+
+        def stop_confirming() -> None:
+            nonlocal confirm_timer
+            if confirm_timer is not None:
+                confirm_timer.cancel()
+                confirm_timer = None
+            self._on_stream_data = None
+
+        def confirmed() -> None:
+            nonlocal connected
+            stop_confirming()
+            if not connected:
+                connected = True
+                on_connect()
 
         async def opened() -> None:
-            nonlocal connected
-            connected = True
-            on_connect()
+            nonlocal confirm_timer
+            # Called before the SDK reads the response, an HTTP error included: only an event,
+            # or a connection that stays open, confirms it.
+            stop_confirming()
+            confirm_timer = loop.call_later(self.stream_confirm_after, confirmed)
+            self._on_stream_data = confirmed
 
         def closed(error: BaseException | None = None) -> None:
             nonlocal connected
+            stop_confirming()
             if connected:
                 connected = False
                 on_disconnect()
@@ -351,6 +482,7 @@ class ApiKeyBackend:
             stream.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await stream
+            stop_confirming()
             self._remove_listeners()
             self._on_record = None
 
@@ -410,6 +542,8 @@ class ApiKeyBackend:
             return
 
         def on_event(event: dict[str, Any]) -> None:
+            if self._on_stream_data is not None:
+                self._on_stream_data()  # the first event confirms the connection
             self._apply_event(appliance_id, event)
 
         self._listeners[appliance_id] = on_event

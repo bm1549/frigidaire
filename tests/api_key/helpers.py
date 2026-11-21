@@ -5,6 +5,7 @@ Only tests under ``tests/api_key`` use them, so deleting the API key backend del
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import inspect
 import json
@@ -60,6 +61,34 @@ class _StreamResponse(_Response):
     @property
     def closed(self) -> bool:
         return False
+
+
+class _HeldOpen:
+    """A response body that, once read, waits for more instead of ending."""
+
+    def __init__(self, reader: Any) -> None:
+        self._reader = reader
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._reader, name)
+
+    async def readline(self) -> bytes:
+        line: bytes = await self._reader.readline()
+        if not line:
+            await asyncio.Event().wait()  # until the reader is cancelled
+        return line
+
+
+class _OpenStreamResponse(_StreamResponse):
+    """An event stream that sends its body and then stays open, sending nothing more."""
+
+    @property  # type: ignore[override]
+    def content(self) -> Any:
+        return self._held_open
+
+    @content.setter
+    def content(self, reader: Any) -> None:
+        self._held_open = _HeldOpen(reader)
 
 
 def list_item(record: dict) -> dict:
@@ -147,14 +176,15 @@ class SdkMock:
             repeat=True,
         )
 
-    def stream(self, *events: dict) -> None:
-        """One connection of the event stream, which sends these events and then ends."""
+    def stream(self, *events: dict, stay_open: bool = False) -> None:
+        """One connection of the event stream, which sends these events and then ends, or with
+        ``stay_open`` stays open until the stream is cancelled."""
         self.add(
             "GET",
             STREAM_URL,
             body=sse(*events),
             content_type="text/event-stream",
-            response_class=_StreamResponse,
+            response_class=_OpenStreamResponse if stay_open else _StreamResponse,
         )
 
     def _command(self, appliance_id: str) -> Callable[..., None]:

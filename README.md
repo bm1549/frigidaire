@@ -90,10 +90,21 @@ event stream until cancelled, reconnecting when it drops, and calls `on_update` 
 `Appliance` snapshot for every pushed change. Poll `get_appliances()` now and then as well, and
 after each reconnect, to catch anything the stream missed.
 
+`listen` reports a connection through `on_connect` only once the stream delivers its first event or
+has stayed open for `stream_confirm_after` seconds (10 by default), and `on_disconnect` only after
+an `on_connect`. The SDK hides the HTTP status of the stream's own response, so a stream that
+answers with an HTTP error, a 401 or 403 included, looks like one that drops at once: it is never
+reported as connected, and the SDK keeps retrying with backoff up to `stream_max_backoff` seconds
+(120 by default). Rejected tokens still end `listen` with `AuthenticationError`, because each
+attempt first fetches the stream's configuration with them.
+
 The official API allows a limited number of calls per day. Each appliance's info is fetched once
 and cached; after that a full `get_appliances()` costs one call plus one per appliance, and
 `refresh(appliance)` costs one. A used-up quota raises `QuotaExceededError`, and rejected tokens
-raise `AuthenticationError`; get a new set of values from the portal.
+raise `AuthenticationError`; get a new set of values from the portal. A token refresh that gets no
+answer, or a server error from the token endpoint, raises a plain `FrigidaireException` instead:
+the refresh token was not spent, so try again later. If every appliance's state fails to load,
+`get_appliances()` raises rather than returning an empty list.
 
 ## Sessions and the active-session cap
 
