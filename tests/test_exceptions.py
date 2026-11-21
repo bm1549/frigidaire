@@ -5,11 +5,11 @@ import responses
 
 from frigidaire import (
     AuthenticationError,
-    Frigidaire,
     FrigidaireException,
     LoginError,
     SessionCapError,
 )
+from frigidaire.backends.password.transport import PasswordTransport
 from tests.conftest import APPLIANCES_URL, IDENTITY_DOMAIN, NO_RATE_LIMIT, make_authenticated_client
 from tests.test_authenticate import _stub_full_auth
 
@@ -19,7 +19,7 @@ def test_session_cap_is_a_typed_exception() -> None:
 
     r = _resp(429, b'{"error":"cas_3403"}', json_data={"error": "cas_3403"})
     with pytest.raises(SessionCapError) as exc_info:
-        Frigidaire.parse_response(r)
+        PasswordTransport.parse_response(r)
     assert isinstance(exc_info.value, FrigidaireException)
     assert exc_info.value.status_code == 429
 
@@ -27,16 +27,16 @@ def test_session_cap_is_a_typed_exception() -> None:
 def test_handle_request_exception_preserves_subclass() -> None:
     cause = SessionCapError("orig", status_code=429, error_code="cas_3403")
     with pytest.raises(SessionCapError) as exc_info:
-        Frigidaire.handle_request_exception(cause, "GET", "http://x/y", {}, "")
+        PasswordTransport.handle_request_exception(cause, "GET", "http://x/y", {}, "")
     assert exc_info.value.error_code == "cas_3403"
 
 
 @responses.activate
-def test_session_cap_propagates_typed_through_get_appliances() -> None:
+def test_session_cap_propagates_typed_through_get_appliances_raw() -> None:
     client = make_authenticated_client()
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "cas_3403"}, status=429)
     with pytest.raises(SessionCapError):
-        client.get_appliances()
+        client.get_appliances_raw()
 
 
 @responses.activate
@@ -49,7 +49,7 @@ def test_rejected_login_raises_authentication_error() -> None:
         status=200,
     )
     with pytest.raises(AuthenticationError):
-        Frigidaire(username="user", password="wrong", **NO_RATE_LIMIT)
+        PasswordTransport(username="user", password="wrong", **NO_RATE_LIMIT)
 
 
 @responses.activate
@@ -62,7 +62,7 @@ def test_disabled_account_raises_authentication_error() -> None:
         status=200,
     )
     with pytest.raises(AuthenticationError):
-        Frigidaire(username="user", password="p", **NO_RATE_LIMIT)
+        PasswordTransport(username="user", password="p", **NO_RATE_LIMIT)
 
 
 @responses.activate
@@ -78,7 +78,7 @@ def test_account_pending_registration_is_not_a_credential_error() -> None:
         status=200,
     )
     with pytest.raises(LoginError) as exc_info:
-        Frigidaire(username="user", password="p", **NO_RATE_LIMIT)
+        PasswordTransport(username="user", password="p", **NO_RATE_LIMIT)
     assert not isinstance(exc_info.value, AuthenticationError)
     assert "206001" in str(exc_info.value)
 
@@ -99,7 +99,7 @@ def test_authentication_error_is_a_frigidaire_exception() -> None:
         status=200,
     )
     with pytest.raises(FrigidaireException):
-        Frigidaire(username="user", password="wrong", **NO_RATE_LIMIT)
+        PasswordTransport(username="user", password="wrong", **NO_RATE_LIMIT)
 
 
 @responses.activate
@@ -110,5 +110,5 @@ def test_session_cap_while_testing_the_session_is_not_retried_with_a_new_login()
     responses.add(responses.GET, USERS_CURRENT_URL, json={"error": "cas_3403"}, status=429)
     _stub_full_auth()
     with pytest.raises(SessionCapError):
-        Frigidaire(username="u", password="p", session_key="k", regional_base_url=REGIONAL_URL, **NO_RATE_LIMIT)
+        PasswordTransport(username="u", password="p", session_key="k", regional_base_url=REGIONAL_URL, **NO_RATE_LIMIT)
     assert [c.request.url for c in responses.calls] == [USERS_CURRENT_URL]

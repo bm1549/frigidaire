@@ -4,7 +4,8 @@ from pathlib import Path
 
 import responses
 
-from frigidaire import Frigidaire, JsonFileSessionStore
+from frigidaire import JsonFileSessionStore
+from frigidaire.backends.password.transport import PasswordTransport
 from tests.conftest import NO_RATE_LIMIT, REGIONAL_URL, USERS_CURRENT_URL
 from tests.test_authenticate import _stub_full_auth
 
@@ -32,7 +33,7 @@ def test_client_loads_session_from_store(tmp_path: Path) -> None:
     store.save("STORED-KEY", REGIONAL_URL)
     responses.add(responses.GET, USERS_CURRENT_URL, json={"id": "x"}, status=200)
 
-    client = Frigidaire(username="u", password="p", session_store=store, **NO_RATE_LIMIT)
+    client = PasswordTransport(username="u", password="p", session_store=store, **NO_RATE_LIMIT)
 
     assert client.session_key == "STORED-KEY"
     assert len(responses.calls) == 1
@@ -44,7 +45,7 @@ def test_explicit_session_key_overrides_store(tmp_path: Path) -> None:
     store.save("STORED-KEY", REGIONAL_URL)
     responses.add(responses.GET, USERS_CURRENT_URL, json={"id": "x"}, status=200)
 
-    client = Frigidaire(
+    client = PasswordTransport(
         username="u",
         password="p",
         session_key="EXPLICIT",
@@ -63,7 +64,7 @@ def test_minted_session_is_saved_to_store(tmp_path: Path) -> None:
     _stub_full_auth()
     store = JsonFileSessionStore(str(tmp_path / "s.json"))
 
-    Frigidaire(username="u", password="p", session_store=store, **NO_RATE_LIMIT)
+    PasswordTransport(username="u", password="p", session_store=store, **NO_RATE_LIMIT)
 
     assert store.load() == ("FINAL-ACCESS-TOKEN", REGIONAL_URL)
 
@@ -79,5 +80,5 @@ def test_failing_store_does_not_break_auth(tmp_path: Path) -> None:
         def save(self, session_key, regional_base_url):
             raise RuntimeError("disk full")
 
-    client = Frigidaire(username="u", password="p", session_store=Broken(), **NO_RATE_LIMIT)
+    client = PasswordTransport(username="u", password="p", session_store=Broken(), **NO_RATE_LIMIT)
     assert client.session_key == "FINAL-ACCESS-TOKEN"

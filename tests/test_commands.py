@@ -1,20 +1,31 @@
-"""Appliance commands encode the protocol quirks so callers do not have to."""
+"""Appliance commands encode the protocol quirks so callers do not have to.
+
+Every command sequence is tested once, here, against the fake backend: the facade sends one
+property per ``backend.send`` call, so the recorded ``(key, value)`` pairs are exactly what each
+backend sends, one request each.
+"""
 
 from __future__ import annotations
 
-import json
-
 import pytest
-import responses
 
-from frigidaire import Appliance, FanSpeed, FrigidaireException, Mode, Unit
-from tests.conftest import REGIONAL_URL, make_authenticated_client, make_raw_appliance
-
-COMMAND_URL = f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command"
+from frigidaire import Appliance, FanSpeed, Frigidaire, FrigidaireException, Mode, Unit
+from frigidaire.testing import FakeBackend
+from tests.conftest import make_raw_appliance
 
 
-def _puts() -> list[dict]:
-    return [json.loads(c.request.body) for c in responses.calls if c.request.method == "PUT"]
+@pytest.fixture
+def backend() -> FakeBackend:
+    return FakeBackend()
+
+
+@pytest.fixture
+def client(backend: FakeBackend) -> Frigidaire:
+    return Frigidaire(backend)
+
+
+def _sent(backend: FakeBackend) -> list[dict]:
+    return [{key: value} for key, value in backend.commands]
 
 
 def _ac(**reported) -> Appliance:
@@ -27,41 +38,34 @@ def _dh(**reported) -> Appliance:
     return Appliance(make_raw_appliance("DH", appliance_id="AC1", reported={**base, **reported}))
 
 
-@responses.activate
-def test_ac_set_mode_on_running_unit_sends_power_then_mode() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_ac_set_mode_on_running_unit_sends_power_then_mode(client: Frigidaire, backend: FakeBackend) -> None:
+    await client.set_mode(_ac(), Mode.FAN)
 
-    client.set_mode(_ac(), Mode.FAN)
-
-    assert _puts() == [{"executeCommand": "ON"}, {"mode": "FANONLY"}]
+    assert _sent(backend) == [{"executeCommand": "ON"}, {"mode": "FANONLY"}]
 
 
 @pytest.mark.parametrize("mode_name", ["HEAT", "COOL", "ECO"])
-@responses.activate
-def test_ac_set_mode_on_running_unit_preserves_requested_mode(mode_name: str) -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_ac_set_mode_on_running_unit_preserves_requested_mode(
+    mode_name: str, client: Frigidaire, backend: FakeBackend
+) -> None:
+    await client.set_mode(_ac(targetTemperatureF=72), Mode[mode_name])
 
-    client.set_mode(_ac(targetTemperatureF=72), Mode[mode_name])
-
-    assert _puts() == [{"executeCommand": "ON"}, {"mode": mode_name}]
+    assert _sent(backend) == [{"executeCommand": "ON"}, {"mode": mode_name}]
 
 
 @pytest.mark.parametrize("off_report", [{"applianceState": "off"}, {"mode": "off"}])
 @pytest.mark.parametrize(
     "unit,target_key,target", [("fahrenheit", "targetTemperatureF", 72), ("celsius", "targetTemperatureC", 22)]
 )
-@responses.activate
-def test_ac_set_heat_from_off_restores_setpoint_last(off_report: dict, unit: str, target_key: str, target: int) -> None:
+async def test_ac_set_heat_from_off_restores_setpoint_last(
+    off_report: dict, unit: str, target_key: str, target: int, client: Frigidaire, backend: FakeBackend
+) -> None:
     """Synthetic off snapshots exercise both off signals and each reported temperature unit."""
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
     appliance = _ac(**{**off_report, "temperatureRepresentation": unit, target_key: target})
 
-    client.set_mode(appliance, Mode.HEAT)
+    await client.set_mode(appliance, Mode.HEAT)
 
-    assert _puts() == [
+    assert _sent(backend) == [
         {"executeCommand": "ON"},
         {"mode": "HEAT"},
         {"temperatureRepresentation": unit.upper()},
@@ -69,25 +73,18 @@ def test_ac_set_heat_from_off_restores_setpoint_last(off_report: dict, unit: str
     ]
 
 
-@responses.activate
-def test_ac_set_heat_from_off_without_setpoint_skips_it() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_ac_set_heat_from_off_without_setpoint_skips_it(client: Frigidaire, backend: FakeBackend) -> None:
+    await client.set_mode(_ac(applianceState="OFF"), Mode.HEAT)
 
-    client.set_mode(_ac(applianceState="OFF"), Mode.HEAT)
-
-    assert _puts() == [{"executeCommand": "ON"}, {"mode": "HEAT"}]
+    assert _sent(backend) == [{"executeCommand": "ON"}, {"mode": "HEAT"}]
 
 
-@responses.activate
-def test_ac_set_mode_from_off_resends_setpoint_last() -> None:
+async def test_ac_set_mode_from_off_resends_setpoint_last(client: Frigidaire, backend: FakeBackend) -> None:
     """The appliance forgets its setpoint on power-on and the mode restores a default."""
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
 
-    client.set_mode(_ac(applianceState="OFF", targetTemperatureF=72), Mode.COOL)
+    await client.set_mode(_ac(applianceState="OFF", targetTemperatureF=72), Mode.COOL)
 
-    assert _puts() == [
+    assert _sent(backend) == [
         {"executeCommand": "ON"},
         {"mode": "COOL"},
         {"temperatureRepresentation": "FAHRENHEIT"},
@@ -95,105 +92,75 @@ def test_ac_set_mode_from_off_resends_setpoint_last() -> None:
     ]
 
 
-@responses.activate
-def test_ac_set_mode_from_off_without_setpoint_skips_it() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_ac_set_mode_from_off_without_setpoint_skips_it(client: Frigidaire, backend: FakeBackend) -> None:
+    await client.set_mode(_ac(mode="OFF"), Mode.COOL)
 
-    client.set_mode(_ac(mode="OFF"), Mode.COOL)
-
-    assert _puts() == [{"executeCommand": "ON"}, {"mode": "COOL"}]
+    assert _sent(backend) == [{"executeCommand": "ON"}, {"mode": "COOL"}]
 
 
-@responses.activate
-def test_ac_auto_is_sent_as_eco() -> None:
+async def test_ac_auto_is_sent_as_eco(client: Frigidaire, backend: FakeBackend) -> None:
     """An AC silently ignores Mode.AUTO; its energy-saving mode is ECO."""
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
 
-    client.set_mode(_ac(), Mode.AUTO)
+    await client.set_mode(_ac(), Mode.AUTO)
 
-    assert _puts()[-1] == {"mode": "ECO"}
+    assert _sent(backend)[-1] == {"mode": "ECO"}
 
 
-@responses.activate
-def test_ac_set_mode_off_sends_only_mode_off() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_ac_set_mode_off_sends_only_mode_off(client: Frigidaire, backend: FakeBackend) -> None:
+    await client.set_mode(_ac(), Mode.OFF)
 
-    client.set_mode(_ac(), Mode.OFF)
-
-    assert _puts() == [{"mode": "OFF"}]
+    assert _sent(backend) == [{"mode": "OFF"}]
 
 
-@responses.activate
-def test_dh_set_mode_powers_on_first_only_when_off() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_dh_set_mode_powers_on_first_only_when_off(client: Frigidaire, backend: FakeBackend) -> None:
+    await client.set_mode(_dh(applianceState="OFF"), Mode.CONTINUOUS)
+    assert _sent(backend) == [{"executeCommand": "ON"}, {"mode": "CONTINUOUS"}]
 
-    client.set_mode(_dh(applianceState="OFF"), Mode.CONTINUOUS)
-    assert _puts() == [{"executeCommand": "ON"}, {"mode": "CONTINUOUS"}]
-
-    responses.calls.reset()
-    client.set_mode(_dh(), Mode.CONTINUOUS)
-    assert _puts() == [{"mode": "CONTINUOUS"}]
+    backend.commands.clear()
+    await client.set_mode(_dh(), Mode.CONTINUOUS)
+    assert _sent(backend) == [{"mode": "CONTINUOUS"}]
 
 
-@responses.activate
-def test_set_humidity_rounds_to_five_and_enters_dry_mode_first() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_set_humidity_rounds_to_five_and_enters_dry_mode_first(client: Frigidaire, backend: FakeBackend) -> None:
+    await client.set_humidity(_dh(mode="AUTO"), 52)
 
-    client.set_humidity(_dh(mode="AUTO"), 52)
-
-    assert _puts() == [{"mode": "DRY"}, {"targetHumidity": 50}]
+    assert _sent(backend) == [{"mode": "DRY"}, {"targetHumidity": 50}]
 
 
-@responses.activate
-def test_set_humidity_out_of_range_raises_before_sending_anything() -> None:
-    client = make_authenticated_client()
+async def test_set_humidity_out_of_range_raises_before_sending_anything(
+    client: Frigidaire, backend: FakeBackend
+) -> None:
     with pytest.raises(FrigidaireException, match="between 35 and 85"):
-        client.set_humidity(_dh(), 90)
-    assert _puts() == []
+        await client.set_humidity(_dh(), 90)
+    assert _sent(backend) == []
 
 
-@responses.activate
-def test_set_temperature_defaults_to_the_appliance_unit() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_set_temperature_defaults_to_the_appliance_unit(client: Frigidaire, backend: FakeBackend) -> None:
+    await client.set_temperature(_ac(temperatureRepresentation="celsius"), 22)
 
-    client.set_temperature(_ac(temperatureRepresentation="celsius"), 22)
-
-    assert _puts() == [{"temperatureRepresentation": "CELSIUS"}, {"targetTemperatureC": 22}]
+    assert _sent(backend) == [{"temperatureRepresentation": "CELSIUS"}, {"targetTemperatureC": 22}]
 
 
-@responses.activate
-def test_set_temperature_explicit_unit() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_set_temperature_explicit_unit(client: Frigidaire, backend: FakeBackend) -> None:
+    await client.set_temperature(_ac(), 72, Unit.FAHRENHEIT)
 
-    client.set_temperature(_ac(), 72, Unit.FAHRENHEIT)
-
-    assert _puts() == [{"temperatureRepresentation": "FAHRENHEIT"}, {"targetTemperatureF": 72}]
+    assert _sent(backend) == [{"temperatureRepresentation": "FAHRENHEIT"}, {"targetTemperatureF": 72}]
 
 
-@responses.activate
-def test_simple_setters() -> None:
-    client = make_authenticated_client()
-    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+async def test_simple_setters(client: Frigidaire, backend: FakeBackend) -> None:
     appliance = _ac()
 
-    client.set_power(appliance, False)
-    client.set_fan_speed(appliance, FanSpeed.MEDIUM)
-    client.set_sleep_mode(appliance, True)
-    client.set_vertical_swing(appliance, False)
-    client.set_ui_lock(appliance, True)
-    client.set_display_light(appliance, True)
-    client.set_clean_air_mode(appliance, False)
-    client.set_start_time(appliance, 1800)
-    client.set_stop_time(appliance, 0)
+    await client.set_power(appliance, False)
+    await client.set_fan_speed(appliance, FanSpeed.MEDIUM)
+    await client.set_sleep_mode(appliance, True)
+    await client.set_vertical_swing(appliance, False)
+    await client.set_ui_lock(appliance, True)
+    await client.set_display_light(appliance, True)
+    await client.set_clean_air_mode(appliance, False)
+    await client.set_start_time(appliance, 1800)
+    await client.set_stop_time(appliance, 0)
 
-    assert _puts() == [
+    assert _sent(backend) == [
         {"executeCommand": "OFF"},
         {"fanSpeedSetting": "MIDDLE"},
         {"sleepMode": "ON"},

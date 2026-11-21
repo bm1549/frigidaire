@@ -1,8 +1,9 @@
-"""Tests for the Frigidaire HTTP orchestration (get_appliances, execute_action, re-auth).
+"""Tests for the password transport's HTTP orchestration (get_appliances_raw, send_command, re-auth).
 
 The full authenticate() flow is exercised in test_authenticate.py. Here we shortcut
 authentication by passing a valid session_key + regional_base_url, which makes
-__init__ call test_connection() once and return.
+__init__ call test_connection() once and return. Parsing records into appliances is the
+facade's job and is tested in test_client.py.
 """
 
 import json
@@ -11,11 +12,18 @@ import pytest
 import responses
 
 from frigidaire import Action, FrigidaireException, Mode, Power
-from tests.conftest import APPLIANCES_URL, REGIONAL_URL, make_appliance, make_authenticated_client, make_raw_appliance
+from frigidaire.backends.password.transport import PasswordTransport
+from frigidaire.model import Component
+from tests.conftest import APPLIANCES_URL, REGIONAL_URL, make_authenticated_client, make_raw_appliance
+
+
+def _send(client: PasswordTransport, action: list[Component], appliance_id: str = "AC1") -> None:
+    for component in action:
+        client.send_command(appliance_id, component.name, component.value)
 
 
 @responses.activate
-def test_get_appliances_returns_known_destinations() -> None:
+def test_get_appliances_raw_returns_every_record() -> None:
     client = make_authenticated_client()
     responses.add(
         responses.GET,
@@ -34,42 +42,19 @@ def test_get_appliances_returns_known_destinations() -> None:
         ],
         status=200,
     )
-    appliances = client.get_appliances()
-    assert [a.appliance_id for a in appliances] == ["AC1", "DH1"]
+    records = client.get_appliances_raw()
+    assert [r["applianceId"] for r in records] == ["AC1", "DH1"]
+    assert records[1]["properties"]["reported"] == {"targetHumidity": 50}
 
 
 @responses.activate
-def test_get_appliances_skips_unresolvable_appliance() -> None:
-    client = make_authenticated_client()
-    responses.add(
-        responses.GET,
-        APPLIANCES_URL,
-        json=[
-            {
-                "applianceId": "OK",
-                "applianceData": {"modelName": "AC", "applianceName": "n"},
-                "properties": {"reported": {}},
-            },
-            {
-                "applianceId": "SKIP",
-                "applianceData": {"modelName": "Mystery", "applianceName": "n2"},
-                "properties": {"reported": {"unrelated": 1}},
-            },
-        ],
-        status=200,
-    )
-    appliances = client.get_appliances()
-    assert [a.appliance_id for a in appliances] == ["OK"]
-
-
-@responses.activate
-def test_execute_action_puts_each_component_separately() -> None:
+def test_send_command_puts_each_component_separately() -> None:
     """Action.set_temperature returns 2 components; each must be a separate PUT."""
     client = make_authenticated_client()
     command_url = f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command"
     responses.add(responses.PUT, command_url, json={}, status=200)
 
-    client.execute_action(make_appliance(), Action.set_temperature(72))
+    _send(client, Action.set_temperature(72))
 
     puts = [c for c in responses.calls if c.request.method == "PUT"]
     assert len(puts) == 2
@@ -79,14 +64,13 @@ def test_execute_action_puts_each_component_separately() -> None:
 
 
 @responses.activate
-def test_execute_action_set_power_sends_one_put() -> None:
+def test_send_command_sends_one_put_per_call() -> None:
     client = make_authenticated_client()
     command_url = f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command"
     responses.add(responses.PUT, command_url, json={}, status=200)
 
-    appliance = make_appliance()
-    client.execute_action(appliance, Action.set_power(Power.ON))
-    client.execute_action(appliance, Action.set_mode(Mode.COOL))
+    _send(client, Action.set_power(Power.ON))
+    _send(client, Action.set_mode(Mode.COOL))
 
     puts = [c for c in responses.calls if c.request.method == "PUT"]
     assert len(puts) == 2
@@ -96,7 +80,7 @@ def test_execute_action_set_power_sends_one_put() -> None:
 def test_request_includes_bearer_token() -> None:
     client = make_authenticated_client()
     responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
-    client.get_appliances()
+    client.get_appliances_raw()
 
     call = next(c for c in responses.calls if "appliances?includeMetadata=true" in c.request.url)
     assert call.request.headers["Authorization"] == "Bearer valid-key"
@@ -117,7 +101,7 @@ def test_429_with_cas_3403_does_not_reauth(monkeypatch: pytest.MonkeyPatch) -> N
         status=429,
     )
     with pytest.raises(FrigidaireException):
-        client.get_appliances()
+        client.get_appliances_raw()
     assert reauth_called == []
 
 
@@ -137,8 +121,8 @@ def test_transient_failure_retries_on_existing_session_without_reauth(monkeypatc
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
 
-    appliances = client.get_appliances()
-    assert appliances == []
+    records = client.get_appliances_raw()
+    assert records == []
     assert reauth_called == []
 
 
@@ -160,8 +144,8 @@ def test_persistent_failure_reauths_after_retry_also_fails(monkeypatch: pytest.M
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
 
-    appliances = client.get_appliances()
-    assert appliances == []
+    records = client.get_appliances_raw()
+    assert records == []
     assert len(reauth_called) == 1
 
 
@@ -173,15 +157,14 @@ def test_writes_are_rate_limited_through_session(monkeypatch: pytest.MonkeyPatch
     silently failed, leaving rate limiting disabled in production.
     """
     sleeps: list[float] = []
-    monkeypatch.setattr("frigidaire.rate_limit.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr("frigidaire.backends.password.rate_limit.time.sleep", lambda s: sleeps.append(s))
 
     client = make_authenticated_client(rate_limit_min_interval=1.5, rate_limit_jitter=0.0)
     command_url = f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command"
     responses.add(responses.PUT, command_url, json={}, status=200)
 
-    appliance = make_appliance()
-    client.execute_action(appliance, Action.set_power(Power.ON))
-    client.execute_action(appliance, Action.set_power(Power.OFF))
+    _send(client, Action.set_power(Power.ON))
+    _send(client, Action.set_power(Power.OFF))
 
     # First PUT establishes the next-ok-at; second PUT must sleep ~1.5s
     assert any(abs(s - 1.5) < 0.05 for s in sleeps), f"expected a ~1.5s sleep, got {sleeps}"
@@ -196,7 +179,7 @@ def test_session_max_retries_zero_makes_single_attempt(monkeypatch: pytest.Monke
 
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     with pytest.raises(FrigidaireException):
-        client.get_appliances()
+        client.get_appliances_raw()
     assert reauth_called == []
     appliance_calls = [c for c in responses.calls if c.request.url.startswith(APPLIANCES_URL)]
     assert len(appliance_calls) == 1  # single attempt, no retry
@@ -206,7 +189,7 @@ def test_session_max_retries_zero_makes_single_attempt(monkeypatch: pytest.Monke
 def test_session_retry_backoff_sleeps_between_attempts(monkeypatch: pytest.MonkeyPatch) -> None:
     """A configured backoff sleeps before retrying on the existing session."""
     sleeps: list[float] = []
-    monkeypatch.setattr("frigidaire.time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr("frigidaire.backends.password.transport.time.sleep", lambda s: sleeps.append(s))
 
     client = make_authenticated_client(session_retry_backoff=0.5)
     monkeypatch.setattr(client, "_re_authenticate", lambda: None)
@@ -214,12 +197,12 @@ def test_session_retry_backoff_sleeps_between_attempts(monkeypatch: pytest.Monke
     responses.add(responses.GET, APPLIANCES_URL, json={"error": "boom"}, status=500)
     responses.add(responses.GET, APPLIANCES_URL, json=[], status=200)
 
-    assert client.get_appliances() == []
+    assert client.get_appliances_raw() == []
     assert any(abs(s - 0.5) < 0.01 for s in sleeps), f"expected a ~0.5s backoff sleep, got {sleeps}"
 
 
 @responses.activate
-def test_execute_action_cas_3403_propagates_without_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_send_command_cas_3403_propagates_without_reauth(monkeypatch: pytest.MonkeyPatch) -> None:
     client = make_authenticated_client()
     reauth_called = []
     monkeypatch.setattr(client, "_re_authenticate", lambda: reauth_called.append(True))
@@ -231,30 +214,14 @@ def test_execute_action_cas_3403_propagates_without_reauth(monkeypatch: pytest.M
         status=429,
     )
     with pytest.raises(FrigidaireException):
-        client.execute_action(make_appliance(), Action.set_power(Power.ON))
+        _send(client, Action.set_power(Power.ON))
     assert reauth_called == []  # critical: never re-auth on cas_3403
 
 
 @responses.activate
-def test_get_appliances_skips_malformed_record(caplog: pytest.LogCaptureFixture) -> None:
-    client = make_authenticated_client()
-    responses.add(
-        responses.GET,
-        APPLIANCES_URL,
-        json=[
-            {"applianceData": {"modelName": "AC", "applianceName": "no id"}},
-            {"applianceId": "OK", "applianceData": {"modelName": "AC", "applianceName": "n"}},
-        ],
-        status=200,
-    )
-    assert [a.appliance_id for a in client.get_appliances()] == ["OK"]
-    assert "malformed" in caplog.text
-
-
-@responses.activate
-def test_get_appliances_returns_fresh_state_each_call() -> None:
+def test_get_appliances_raw_returns_fresh_state_each_call() -> None:
     client = make_authenticated_client()
     responses.add(responses.GET, APPLIANCES_URL, json=[make_raw_appliance(reported={"mode": "COOL"})], status=200)
     responses.add(responses.GET, APPLIANCES_URL, json=[make_raw_appliance(reported={"mode": "OFF"})], status=200)
-    assert client.get_appliances()[0].mode is Mode.COOL
-    assert client.get_appliances()[0].mode is Mode.OFF
+    assert client.get_appliances_raw()[0]["properties"]["reported"]["mode"] == "COOL"
+    assert client.get_appliances_raw()[0]["properties"]["reported"]["mode"] == "OFF"

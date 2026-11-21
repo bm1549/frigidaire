@@ -7,7 +7,7 @@ from urllib.parse import quote_plus
 
 import pytest
 
-from frigidaire.signature_generator import get_signature
+from frigidaire.backends.password.signature_generator import get_signature
 from tests.conftest import FAKE_SESSION_SECRET as TEST_SECRET
 
 

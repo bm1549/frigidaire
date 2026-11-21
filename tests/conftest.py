@@ -1,15 +1,17 @@
 """Shared constants and helpers for the test suite."""
 
 import base64
+from collections.abc import Iterator
 
 import pytest
 import responses
 
-from frigidaire import _SCOPED_LIMITERS, _SCOPED_REAUTH_LOCKS, Appliance, Frigidaire
+from frigidaire import Appliance
+from frigidaire.backends.password.transport import _SCOPED_LIMITERS, _SCOPED_REAUTH_LOCKS, PasswordTransport
 from frigidaire.model import _WARNED_APPLIANCE_IDS
 
 # Default kwargs that disable rate limiting and 429 retries — tests should
-# spread these into Frigidaire() constructors so they run instantly.
+# spread these into PasswordTransport() and PasswordBackend() constructors so they run instantly.
 NO_RATE_LIMIT: dict[str, object] = {
     "rate_limit_min_interval": 0.0,
     "rate_limit_jitter": 0.0,
@@ -55,8 +57,8 @@ def make_appliance(model_name: str = "AC", appliance_id: str = "AC1", nickname: 
     return Appliance(make_raw_appliance(model_name=model_name, appliance_id=appliance_id, nickname=nickname))
 
 
-def make_authenticated_client(**overrides: object) -> Frigidaire:
-    """A Frigidaire client that skips the full auth flow by presenting a valid session_key.
+def make_authenticated_client(**overrides: object) -> PasswordTransport:
+    """A password transport that skips the full auth flow by presenting a valid session_key.
 
     Rate limiting and 429 retries are disabled by default to keep tests fast and deterministic;
     callers exercising those features can pass them via overrides.
@@ -72,4 +74,19 @@ def make_authenticated_client(**overrides: object) -> Frigidaire:
         **NO_RATE_LIMIT,
         **overrides,
     }
-    return Frigidaire(**kwargs)  # type: ignore[arg-type]
+    return PasswordTransport(**kwargs)  # type: ignore[arg-type]
+
+
+@pytest.fixture
+def http_mock() -> Iterator[None]:
+    """Activate ``responses``' default mock for async tests, where ``@responses.activate`` does not fit.
+
+    The mock patches ``requests`` process-wide, so it also covers calls the password backend makes
+    from worker threads.
+    """
+    responses.start()
+    try:
+        yield
+    finally:
+        responses.stop()
+        responses.reset()

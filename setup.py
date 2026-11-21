@@ -22,7 +22,9 @@ setuptools.setup(
     extras_require={
         "dev": [
             "pytest>=7.0",
+            "pytest-asyncio>=0.23",
             "pytest-cov>=4.0",
+            "aioresponses>=0.7.6",
             "responses>=0.23",
             "freezegun>=1.2",
             "ruff>=0.5.0",

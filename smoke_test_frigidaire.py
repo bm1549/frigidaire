@@ -8,8 +8,8 @@ from dataclasses import asdict, is_dataclass
 
 import requests
 
-from frigidaire import Frigidaire
-from frigidaire.rate_limit import RateLimiter, wrap_session_request
+from frigidaire.backends.password.rate_limit import RateLimiter, wrap_session_request
+from frigidaire.backends.password.transport import PasswordTransport
 
 
 def env_or(v, k):
@@ -59,7 +59,7 @@ def main():
 
     print("== Frigidaire smoke tests ==")
     print("Auth → list appliances (read-only) ...")
-    api = Frigidaire(
+    api = PasswordTransport(
         username=username,
         password=password,
         rate_limit_min_interval=args.min_interval,
@@ -69,9 +69,9 @@ def main():
 
     # 1) List appliances (read-only)
     try:
-        appliances = api.get_appliances()
+        appliances = api.get_appliances_raw()
     except Exception as e:
-        print(f"FAIL: get_appliances raised: {e}", file=sys.stderr)
+        print(f"FAIL: get_appliances_raw raised: {e}", file=sys.stderr)
         return 3
     print(json.dumps(_normalize(appliances), indent=2))
     print(f"Found {len(appliances) if isinstance(appliances, (list, tuple)) else 'N/A'} appliance(s). ✓")

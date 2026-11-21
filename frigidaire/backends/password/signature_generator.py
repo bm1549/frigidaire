@@ -1,6 +1,8 @@
 # Ported to Python from https://github.com/SAP/gigya-android-sdk/tree/main
 # Licensed under Apache 2.0, a copy of which is enclosed in this repository
 
+from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
