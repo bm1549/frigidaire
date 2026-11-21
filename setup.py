@@ -17,12 +17,17 @@ setuptools.setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/bm1549/frigidaire",
-    packages=setuptools.find_packages(),
-    install_requires=["requests>=2.25.1", "electrolux-group-developer-sdk==0.7.0"],
+    packages=setuptools.find_packages(exclude=["tests", "tests.*"]),
+    install_requires=[
+        "requests>=2.25.1",
+        "electrolux-group-developer-sdk==0.7.0",
+        "aiohttp>=3.12.2,<4",
+        "PyJWT>=2.10.1,<3",
+    ],
     extras_require={
         "dev": [
             "pytest>=7.0",
-            "pytest-asyncio>=0.23",
+            "pytest-asyncio>=0.24",
             "pytest-cov>=4.0",
             "aioresponses>=0.7.6",
             "responses>=0.23",
