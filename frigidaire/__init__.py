@@ -479,6 +479,25 @@ class Frigidaire:
 
         return self._with_reauth(fetch)
 
+    def get_capabilities(self, appliance: Appliance) -> dict:
+        """
+        The appliance's capabilities list: for each setting its access (read, write, readwrite),
+        type, and allowed values or range, plus triggers that change them per mode. Useful to
+        tell models apart (a Telica lists mode SMART and fan speed QUIET), but not complete: a
+        Telica takes displayLight without listing it. Will authenticate if the request fails.
+        """
+        path = f"/appliance/api/v2/appliances/{appliance.appliance_id}/capabilities"
+
+        def fetch() -> dict:
+            # Built per attempt: a retry after re-authentication must carry the new session key.
+            headers = self.get_headers_frigidaire("GET", include_bearer_token=True)
+            result = self.get_request(self.regional_base_url, path, headers)
+            if not isinstance(result, dict):
+                raise FrigidaireException(f"Unexpected capabilities response: {type(result).__name__}")
+            return result
+
+        return self._with_reauth(fetch)
+
     def execute_action(self, appliance: Appliance, action: list[Component]) -> None:
         """
         Sends each component of an action to an appliance, one request per component.
@@ -515,6 +534,11 @@ class Frigidaire:
         forgets its setpoint and engaging the mode restores a default, so the remembered
         setpoint is re-sent last. Mode.AUTO is a dehumidifier value that an AC silently
         ignores; its energy-saving mode is ECO.
+
+        A Telica portable AC (GHPC142AA1) has no ECO: it answers ECO with 200 and stays in
+        its mode. Its automatic mode is SMART, which get_capabilities() lists and ECO it does
+        not. SMART picks its own setpoint (the capabilities disable targetTemperature there),
+        so no setpoint is re-sent for it.
         """
         if mode is Mode.OFF:
             self.execute_action(appliance, Action.set_mode(Mode.OFF))
@@ -527,7 +551,7 @@ class Frigidaire:
             self.set_power(appliance, True)
             self.execute_action(appliance, Action.set_mode(mode))
             target = appliance.target_temperature
-            if was_off and target is not None:
+            if was_off and target is not None and mode is not Mode.SMART:
                 self.set_temperature(appliance, int(target))
             return
 
@@ -559,7 +583,14 @@ class Frigidaire:
         self.execute_action(appliance, Action.set_ui_lock_mode(on))
 
     def set_display_light(self, appliance: Appliance, on: bool) -> None:
-        self.execute_action(appliance, Action.set_display_light(DisplayLight.ON if on else DisplayLight.OFF))
+        """Sends the vocabulary the appliance reports: plain ON/OFF to a Telica, DISPLAY_LIGHT_1/_0 otherwise."""
+        if appliance.display_light_is_plain:
+            self.execute_action(appliance, Action.set_display_light_plain(on))
+        else:
+            self.execute_action(appliance, Action.set_display_light(DisplayLight.ON if on else DisplayLight.OFF))
+
+    def set_sound(self, appliance: Appliance, on: bool) -> None:
+        self.execute_action(appliance, Action.set_sound(on))
 
     def set_clean_air_mode(self, appliance: Appliance, on: bool) -> None:
         self.execute_action(appliance, Action.set_clean_air_mode(on))

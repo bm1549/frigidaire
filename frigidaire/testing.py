@@ -72,6 +72,26 @@ TELICA_AC: dict = {
     "connectionState": "Connected",
 }
 
+# Cut down from what a Telica portable AC (GHPC142AA1) returned for get_capabilities(), 2026-11.
+# It lists no ECO mode and no displayLight, although it takes plain displayLight ON/OFF.
+TELICA_CAPABILITIES: dict = {
+    "mode": {
+        "access": "readwrite",
+        "type": "string",
+        "values": {"SMART": {}, "COOL": {}, "DRY": {}, "FANONLY": {}, "OFF": {"disabled": True}},
+    },
+    "fanSpeedSetting": {
+        "access": "readwrite",
+        "type": "string",
+        "values": {"AUTO": {}, "QUIET": {}, "LOW": {}, "MIDDLE": {}, "HIGH": {}},
+    },
+    "sleepMode": {"access": "readwrite", "type": "string", "values": {"OFF": {}, "ON": {}}},
+    "verticalSwing": {"access": "readwrite", "type": "string", "values": {"OFF": {}, "ON": {}}},
+    "soundVolume": {"access": "readwrite", "type": "number", "max": 1, "min": 0, "step": 1},
+    "targetTemperatureC": {"access": "readwrite", "type": "temperature", "max": 32, "min": 16, "step": 1},
+    "filterState": {"access": "read", "type": "string", "values": {"GOOD": {}, "CLEAN": {}}},
+}
+
 DEHUMIDIFIER: dict = {
     "applianceId": "DH-1",
     "applianceData": {"modelName": "DH", "applianceName": "Basement Dehumidifier"},
@@ -129,6 +149,8 @@ class FakeFrigidaire(Frigidaire):
         self.commands: list[tuple[str, Any]] = []
         self.error: Exception | None = None
         self.fetch_count = 0
+        # Canned get_capabilities() answers by appliance id; an appliance without one gets {}.
+        self.capabilities: dict[str, dict] = {}
         self._persist_session()
 
     def _with_reauth(self, fn: Callable[[], T]) -> T:
@@ -139,6 +161,11 @@ class FakeFrigidaire(Frigidaire):
         if self.error is not None:
             raise self.error
         return [copy.deepcopy(record) for record in self.records.values()]
+
+    def get_capabilities(self, appliance: Appliance) -> dict:
+        if self.error is not None:
+            raise self.error
+        return copy.deepcopy(self.capabilities.get(appliance.appliance_id, {}))
 
     def execute_action(self, appliance: Appliance, action: list[Component]) -> None:
         self.commands.extend((component.name, component.value) for component in action)
