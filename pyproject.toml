@@ -12,6 +12,9 @@ select = [
     "UP",  # pyupgrade
 ]
 
+[tool.ruff.lint.isort]
+combine-as-imports = true
+
 [tool.mypy]
 python_version = "3.10"
 warn_unused_ignores = true
@@ -28,3 +31,5 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-ra"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

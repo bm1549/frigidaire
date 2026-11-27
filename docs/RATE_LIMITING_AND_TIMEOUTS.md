@@ -1,6 +1,6 @@
 # Rate Limiting & Default Timeouts
 
-The client throttles mutating requests and applies a default HTTP timeout. Both are on by default.
+Email-and-password sign-in, through the sync `Frigidaire` client or `PasswordBackend`, throttles mutating requests and applies a default HTTP timeout. Both are on by default.
 
 - **Write call smoothing:** Mutating HTTP verbs (`POST`, `PUT`, `PATCH`, `DELETE`) are spaced out to avoid server lockouts (`cas_3403`).
 - **Retry-After aware:** `429/423` responses back off, honoring `Retry-After` (capped).
@@ -16,9 +16,19 @@ devices = api.get_appliances()
 print(devices)
 ```
 
+The async client takes the same settings through its backend:
+
+```python
+from frigidaire import AsyncFrigidaire, PasswordBackend
+
+client = AsyncFrigidaire(PasswordBackend("username", "password"))
+await client.connect()
+print(await client.get_appliances())
+```
+
 ## Customization
 
-All tunables are optional kwargs on `Frigidaire(...)`:
+All tunables are optional kwargs on `Frigidaire(...)` and on `PasswordBackend(...)`:
 
 - `timeout`: per-request HTTP timeout in seconds; default `15.0`
 - `rate_limit_min_interval`: seconds between write requests; default `1.25`
@@ -73,6 +83,6 @@ What it checks:
 
 ## Notes
 
-- The rate limiter is **in-process** and keyed by `rate_limit_scope_key` (defaults to the account username).
+- The rate limiter is **in-process** and keyed by `rate_limit_scope_key` (defaults to the account username), so a sync client and a `PasswordBackend` for the same account share it.
 - Reads (`GET`) are not rate-limited by default.
 - The default timeout applies to every request unless a per-call `timeout=` is supplied.

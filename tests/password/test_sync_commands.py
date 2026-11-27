@@ -1,4 +1,9 @@
-"""Appliance commands encode the protocol quirks so callers do not have to."""
+"""The sync client puts exactly 1.0's requests on the wire, in 1.0's order.
+
+This is 1.0's tests/test_commands.py, unchanged except for where its helpers are imported from:
+the sequences now come from the planners in frigidaire.model, and this proves the HTTP requests
+did not change. The planners themselves are tested in tests/test_planners.py.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,8 @@ import pytest
 import responses
 
 from frigidaire import Appliance, FanSpeed, FrigidaireException, Mode, Unit
-from tests.conftest import REGIONAL_URL, make_authenticated_client, make_raw_appliance
+from tests.conftest import make_raw_appliance
+from tests.password.helpers import REGIONAL_URL, make_sync_client as make_authenticated_client
 
 COMMAND_URL = f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command"
 

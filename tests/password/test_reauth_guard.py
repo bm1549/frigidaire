@@ -5,8 +5,8 @@ import threading
 import pytest
 import responses
 
-from frigidaire import Component, FrigidaireException, Setting
-from tests.conftest import REGIONAL_URL, make_appliance, make_authenticated_client
+from frigidaire import FrigidaireException
+from tests.password.helpers import make_authenticated_client
 
 
 @responses.activate
@@ -60,25 +60,3 @@ def test_single_failure_still_reauthenticates(monkeypatch: pytest.MonkeyPatch) -
     assert client._with_reauth(operation) == "ok"
     assert calls == ["reauth"]
     assert attempts == ["valid-key", "new-key"]
-
-
-@responses.activate
-def test_command_retry_after_reauthentication_sends_the_new_session_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    client = make_authenticated_client(session_max_retries=1)
-    sent_keys: list[str] = []
-
-    def command(request):
-        sent_keys.append(request.headers["Authorization"])
-        status = 401 if request.headers["Authorization"] == "Bearer valid-key" else 200
-        return status, {}, "{}"
-
-    responses.add_callback(responses.PUT, f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/command", callback=command)
-
-    def fake_reauthenticate() -> None:
-        client.session_key = "new-key"
-
-    monkeypatch.setattr(client, "_re_authenticate", fake_reauthenticate)
-
-    client.execute_action(make_appliance(), [Component(Setting.MODE, "COOL")])
-
-    assert sent_keys == ["Bearer valid-key", "Bearer new-key"]

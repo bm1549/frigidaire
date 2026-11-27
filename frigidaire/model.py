@@ -1,10 +1,10 @@
-"""The appliance model: the wire vocabulary as enums, and a parsed per-appliance snapshot."""
+"""The appliance model: the wire vocabulary as enums, a parsed per-appliance snapshot, and the command planners."""
 
 from __future__ import annotations
 
 import logging
 import math
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from enum import Enum
 from typing import Any
 
@@ -660,3 +660,111 @@ class Appliance:
         if not isinstance(network, Mapping) or network.get("linkQualityIndicator") is None:
             return None
         return str(network["linkQualityIndicator"]).upper()
+
+
+def parse_appliances(records: Iterable[dict]) -> list[Appliance]:
+    """Parse appliance-list records into snapshots, in order.
+
+    Appliances of a type this library cannot place are skipped, as are malformed records, with a
+    warning, so one bad record never sinks the whole fetch.
+    """
+    appliances = []
+    for record in records:
+        try:
+            appliance = Appliance(record)
+        except (KeyError, TypeError):
+            # The id only: the record is a response body, and those stay out of logs.
+            appliance_id = record.get("applianceId") if isinstance(record, dict) else None
+            _LOGGER.warning("Skipping malformed appliance record (applianceId=%r)", appliance_id)
+            continue
+        if appliance.destination is not None:
+            appliances.append(appliance)
+    return appliances
+
+
+# --- command planners ---
+#
+# Every command sequence lives here, once, as a pure function of the snapshot and the arguments.
+# A plan is the ordered list of actions to send, each the component list of one ``Action``
+# builder; a client sends every component in order, one request each. Both clients send these
+# plans, so the sync ``Frigidaire`` and ``AsyncFrigidaire`` put the same requests on the wire in
+# the same order, on every backend. Planning sends nothing, and an invalid argument raises before
+# anything is sent.
+
+
+def plan_set_power(appliance: Appliance, on: bool) -> list[list[Component]]:
+    return [Action.set_power(Power.ON if on else Power.OFF)]
+
+
+def plan_set_mode(appliance: Appliance, mode: Mode) -> list[list[Component]]:
+    """Select an operating mode, powering the appliance on first.
+
+    Air conditioners: power-on is always sent, because the cloud reports the desired state
+    rather than the hardware state. After a failed turn-on it keeps saying RUNNING, so
+    gating on it would skip the power command on every retry; power is a set, not a
+    toggle, so this is harmless on a unit that really is running. A unit that was off
+    forgets its setpoint and engaging the mode restores a default, so the remembered
+    setpoint is re-sent last. Mode.AUTO is a dehumidifier value that an AC silently
+    ignores; its energy-saving mode is ECO.
+
+    Dehumidifiers: power-on is sent first only when the appliance reports that it is off.
+    """
+    if mode is Mode.OFF:
+        return [Action.set_mode(Mode.OFF)]
+
+    if appliance.destination is Destination.AIR_CONDITIONER:
+        if mode is Mode.AUTO:
+            mode = Mode.ECO
+        was_off = appliance.state is ApplianceState.OFF or appliance.mode is Mode.OFF
+        plan = plan_set_power(appliance, True) + [Action.set_mode(mode)]
+        target = appliance.target_temperature
+        if was_off and target is not None:
+            plan += plan_set_temperature(appliance, int(target))
+        return plan
+
+    plan = plan_set_power(appliance, True) if appliance.state is ApplianceState.OFF else []
+    return plan + [Action.set_mode(mode)]
+
+
+def plan_set_temperature(appliance: Appliance, temperature: int, unit: Unit | None = None) -> list[list[Component]]:
+    """Set the AC setpoint. Defaults to the unit the appliance reports in."""
+    unit = unit or appliance.temperature_unit or Unit.FAHRENHEIT
+    return [Action.set_temperature(int(temperature), unit)]
+
+
+def plan_set_fan_speed(appliance: Appliance, fan_speed: FanSpeed) -> list[list[Component]]:
+    return [Action.set_fan_speed(fan_speed)]
+
+
+def plan_set_humidity(appliance: Appliance, humidity: int) -> list[list[Component]]:
+    """Set the dehumidifier target. Snaps to 5% steps; the appliance only accepts a target in Dry mode."""
+    target = Action.set_humidity(5 * round(humidity / 5))
+    return plan_set_mode(appliance, Mode.DRY) + [target]
+
+
+def plan_set_sleep_mode(appliance: Appliance, on: bool) -> list[list[Component]]:
+    return [Action.set_sleep_mode(SleepMode.ON if on else SleepMode.OFF)]
+
+
+def plan_set_vertical_swing(appliance: Appliance, on: bool) -> list[list[Component]]:
+    return [Action.set_vertical_swing(VerticalSwing.ON if on else VerticalSwing.OFF)]
+
+
+def plan_set_ui_lock(appliance: Appliance, on: bool) -> list[list[Component]]:
+    return [Action.set_ui_lock_mode(on)]
+
+
+def plan_set_display_light(appliance: Appliance, on: bool) -> list[list[Component]]:
+    return [Action.set_display_light(DisplayLight.ON if on else DisplayLight.OFF)]
+
+
+def plan_set_clean_air_mode(appliance: Appliance, on: bool) -> list[list[Component]]:
+    return [Action.set_clean_air_mode(on)]
+
+
+def plan_set_start_time(appliance: Appliance, seconds: int) -> list[list[Component]]:
+    return [Action.set_start_time(seconds)]
+
+
+def plan_set_stop_time(appliance: Appliance, seconds: int) -> list[list[Component]]:
+    return [Action.set_stop_time(seconds)]
