@@ -37,6 +37,8 @@ Backends raise only the library's exceptions (:mod:`frigidaire.exceptions`):
 - ``AuthenticationError`` when the credentials or tokens are rejected and new ones are needed.
 - ``LoginError`` for any other failed login, ``SessionCapError`` for the password backend's
   active-session cap.
+- ``QuotaExceededError`` when the request quota is used up, with a ``retry_after`` hint.
+- ``CommandRejectedError`` when an appliance refuses a command in its current state.
 - ``FrigidaireException`` for anything else.
 """
 
