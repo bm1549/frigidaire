@@ -342,3 +342,28 @@ def test_runtime_counters() -> None:
     assert appliance.compressor_runtime_seconds == 1323904
     assert appliance.total_runtime_seconds == 3613076
     assert Appliance(_raw("DH", reported={})).total_runtime_seconds is None
+
+
+# Telica portable AC (GHPC142AA1): what it reported, 2026-11.
+
+
+def test_display_light_reads_a_telica_plain_on_off() -> None:
+    assert Appliance(_raw("Telica", reported={"displayLight": "on"})).display_light is True
+    assert Appliance(_raw("Telica", reported={"displayLight": "off"})).display_light is False
+
+
+def test_display_light_is_plain_only_for_plain_values() -> None:
+    assert Appliance(_raw("Telica", reported={"displayLight": "on"})).display_light_is_plain is True
+    assert Appliance(_raw("DH", reported={"displayLight": "DISPLAY_LIGHT_1"})).display_light_is_plain is False
+    assert Appliance(_raw("DH", reported={})).display_light_is_plain is False
+
+
+def test_quiet_fan_speed() -> None:
+    assert Appliance(_raw("Telica", reported={"fanSpeedSetting": "quiet"})).fan_speed is FanSpeed.QUIET
+
+
+def test_sound_on() -> None:
+    assert Appliance(_raw("Telica", reported={"soundVolume": 1})).sound_on is True
+    assert Appliance(_raw("Telica", reported={"soundVolume": 0})).sound_on is False
+    assert Appliance(_raw("Telica", reported={})).sound_on is None
+    assert Appliance(_raw("Telica", reported={"soundVolume": "loud"})).sound_on is None

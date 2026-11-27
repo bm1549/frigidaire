@@ -99,6 +99,7 @@ class Setting(str, Enum):
     TARGET_TEMPERATURE_C = "targetTemperatureC"
     TARGET_TEMPERATURE_F = "targetTemperatureF"
     TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
+    SOUND_VOLUME = "soundVolume"  # 0 (silent) or 1, on Telica portable ACs
 
     # Humidifier
     CLEAN_AIR_MODE = "cleanAirMode"
@@ -140,6 +141,7 @@ class Detail(str, Enum):
     TARGET_TEMPERATURE_C = "targetTemperatureC"
     TARGET_TEMPERATURE_F = "targetTemperatureF"
     TEMPERATURE_REPRESENTATION = "temperatureRepresentation"
+    SOUND_VOLUME = "soundVolume"
 
     # Air quality, on models with a particulate sensor. Units are µg/m³.
     PM1 = "pm1"
@@ -237,6 +239,7 @@ class FanSpeed(CaseInsensitiveEnum):
     HIGH = "HIGH"
     # Air Conditioner
     AUTO = "AUTO"
+    QUIET = "QUIET"  # Telica portable ACs list it in their capabilities and take it
 
 
 class Component:
@@ -284,6 +287,15 @@ class Action:
     @classmethod
     def set_display_light(cls, display_light: DisplayLight) -> list[Component]:
         return [Component(Setting.DISPLAY_LIGHT, display_light)]
+
+    @classmethod
+    def set_display_light_plain(cls, on: bool) -> list[Component]:
+        """For models that report the display light as a plain on/off (Telica portable ACs)."""
+        return [Component(Setting.DISPLAY_LIGHT, "ON" if on else "OFF")]
+
+    @classmethod
+    def set_sound(cls, on: bool) -> list[Component]:
+        return [Component(Setting.SOUND_VOLUME, 1 if on else 0)]
 
     @classmethod
     def set_clean_air_mode(cls, on: bool) -> list[Component]:
@@ -592,7 +604,28 @@ class Appliance:
     @property
     def display_light(self) -> bool | None:
         light = self._enum(DisplayLight, Detail.DISPLAY_LIGHT)
-        return None if light is None else light is DisplayLight.ON
+        if light is not None:
+            return light is DisplayLight.ON
+        # Telica portable ACs report a plain "on"/"off" instead.
+        return self._on_off(Detail.DISPLAY_LIGHT)
+
+    @property
+    def display_light_is_plain(self) -> bool:
+        """True when the display light is reported as a plain on/off, which is then also what the
+        appliance takes: a Telica answers DISPLAY_LIGHT_0 with 400 ocp_020300 and turns its
+        display off for OFF. Dehumidifiers report DISPLAY_LIGHT_1/_0 and refuse plain ON/OFF."""
+        return self._enum(DisplayLight, Detail.DISPLAY_LIGHT) is None and self._on_off(Detail.DISPLAY_LIGHT) is not None
+
+    @property
+    def sound_on(self) -> bool | None:
+        """Beeps on (soundVolume 1) or silent (0), on models that report it (Telica portable ACs)."""
+        value = self.get(Detail.SOUND_VOLUME)
+        if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+            return None
+        try:
+            return float(value) > 0
+        except ValueError:
+            return None
 
     @property
     def clean_air_mode(self) -> bool | None:

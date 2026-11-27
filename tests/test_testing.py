@@ -64,3 +64,18 @@ def test_with_reported_returns_a_modified_copy() -> None:
     changed = with_reported(LEGACY_AC, mode="OFF")
     assert changed["properties"]["reported"]["mode"] == "OFF"
     assert LEGACY_AC["properties"]["reported"]["mode"] != "OFF"
+
+
+def test_fake_serves_canned_capabilities() -> None:
+    from frigidaire.testing import TELICA_CAPABILITIES
+
+    fake = FakeFrigidaire([TELICA_AC])
+    appliance = fake.get_appliances()[0]
+    assert fake.get_capabilities(appliance) == {}
+
+    fake.capabilities[TELICA_AC["applianceId"]] = TELICA_CAPABILITIES
+    capabilities = fake.get_capabilities(appliance)
+    assert "SMART" in capabilities["mode"]["values"]
+    assert "ECO" not in capabilities["mode"]["values"]
+    capabilities["mode"].clear()  # a copy: the canned answer is untouched
+    assert fake.get_capabilities(appliance) == TELICA_CAPABILITIES

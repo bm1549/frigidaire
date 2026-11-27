@@ -204,3 +204,76 @@ def test_simple_setters() -> None:
         {"startTime": 1800},
         {"stopTime": 0},
     ]
+
+
+# Telica portable AC (GHPC142AA1), measured 2026-11: the cloud answered displayLight
+# DISPLAY_LIGHT_0 with 400 ocp_020300 and plain OFF turned the display off; mode ECO got 200
+# and the unit stayed in COOL, SMART switched it; QUIET and soundVolume were taken.
+
+CAPABILITIES_URL = f"{REGIONAL_URL}/appliance/api/v2/appliances/AC1/capabilities"
+
+
+def _telica(**reported) -> Appliance:
+    base = {"applianceState": "running", "mode": "cool", "temperatureRepresentation": "celsius"}
+    return Appliance(make_raw_appliance("Telica", appliance_id="AC1", reported={**base, **reported}))
+
+
+@responses.activate
+def test_display_light_sends_plain_on_off_to_an_appliance_that_reports_it() -> None:
+    client = make_authenticated_client()
+    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+
+    client.set_display_light(_telica(displayLight="on"), False)
+    client.set_display_light(_telica(displayLight="off"), True)
+
+    assert _puts() == [{"displayLight": "OFF"}, {"displayLight": "ON"}]
+
+
+@responses.activate
+def test_display_light_without_a_reading_keeps_display_light_values() -> None:
+    client = make_authenticated_client()
+    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+
+    client.set_display_light(_telica(), True)
+
+    assert _puts() == [{"displayLight": "DISPLAY_LIGHT_1"}]
+
+
+@responses.activate
+def test_quiet_fan_speed_and_sound() -> None:
+    client = make_authenticated_client()
+    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+
+    client.set_fan_speed(_telica(), FanSpeed.QUIET)
+    client.set_sound(_telica(), True)
+    client.set_sound(_telica(), False)
+
+    assert _puts() == [{"fanSpeedSetting": "QUIET"}, {"soundVolume": 1}, {"soundVolume": 0}]
+
+
+@responses.activate
+def test_smart_from_off_does_not_resend_the_setpoint() -> None:
+    """SMART picks its own setpoint; the capabilities disable targetTemperature in SMART."""
+    client = make_authenticated_client()
+    responses.add(responses.PUT, COMMAND_URL, json={}, status=200)
+
+    client.set_mode(_telica(applianceState="off", targetTemperatureC=16), Mode.SMART)
+
+    assert _puts() == [{"executeCommand": "ON"}, {"mode": "SMART"}]
+
+
+@responses.activate
+def test_get_capabilities() -> None:
+    client = make_authenticated_client()
+    responses.add(responses.GET, CAPABILITIES_URL, json={"mode": {"values": {"SMART": {}}}}, status=200)
+
+    assert client.get_capabilities(_telica()) == {"mode": {"values": {"SMART": {}}}}
+
+
+@responses.activate
+def test_get_capabilities_rejects_a_non_object() -> None:
+    client = make_authenticated_client()
+    responses.add(responses.GET, CAPABILITIES_URL, json=[], status=200)
+
+    with pytest.raises(FrigidaireException):
+        client.get_capabilities(_telica())
